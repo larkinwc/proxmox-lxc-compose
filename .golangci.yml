@@ -1,0 +1,31 @@
+linters:
+  enable:
+    - gofmt
+    - revive
+    - govet
+    - errcheck
+    - staticcheck
+    - gosimple
+    - ineffassign
+    - unconvert
+    - misspell
+    - gocritic
+
+run:
+  timeout: 5m
+  tests: true
+
+issues:
+  exclude-dirs:
+    - vendor
+  exclude-rules:
+    - path: _test\.go
+      linters:
+        - errcheck
+
+output:
+  sort-results: true
+  formats:
+    - format: colored-line-number
+  print-issued-lines: true
+  print-linter-name: true 

@@ -1,39 +1,74 @@
-# lxc-compose
+# proxmox-lxc-compose
 
-`lxc-compose` is a CLI tool that allows you to manage LXC containers using a `docker-compose` like syntax.
+A CLI tool that allows you to manage LXC containers using a docker-compose like syntax.
 
 ## Features
 
-- Define LXC containers using a `docker-compose` like syntax
-- Start, stop, and manage LXC containers per service in the `lxc-compose.yml` file
+- Define LXC containers using a familiar docker-compose like syntax
 - Convert OCI images to LXC templates
-- Retrieve OCI images from a registry for use as template
-- Push LXC templates to a registry as OCI images
+- Manage container lifecycle (create, start, stop, update)
+- Configure container resources (CPU, memory, storage)
+- Set up networking and storage
+- Define environment variables and entry points
 
-## Commands
+## Prerequisites
 
-### `lxc-compose up`
+- Go 1.21 or later
+- Docker (for OCI image conversion)
+- LXC tools
 
-### `lxc-compose down`
- 
-### `lxc-compose pull <image>`
+## Installation
 
-### `lxc-compose push <image>`
+```bash
+go install github.com/larkinwc/proxmox-lxc-compose@latest
+```
+
+Or build from source:
+
+```bash
+git clone https://github.com/larkinwc/proxmox-lxc-compose.git
+cd proxmox-lxc-compose
+go build -o lxc-compose ./cmd/lxc-compose
+```
 
 ## Usage
 
-```bash 
-lxc-compose up
-```
+### Converting OCI Images to LXC Templates
 
 ```bash
-lxc-compose down
+lxc-compose convert ubuntu:20.04
 ```
 
-```bash
-lxc-compose pull <image>
+This will convert the Ubuntu 20.04 Docker image to an LXC template.
+
+### Configuration File (lxc-compose.yml)
+
+```yaml
+version: "1.0"
+services:
+  web:
+    image: ubuntu:20.04
+    cpu:
+      cores: 2
+      shares: 1024
+    memory:
+      limit: 2G
+      swap: 1G
+    network:
+      type: bridge
+      bridge: vmbr0
+      ip: 192.168.1.100
+    storage:
+      root: 10G
+      mounts:
+        - source: /path/to/data
+          target: /data
+    environment:
+      DB_HOST: db
+      DB_PORT: 5432
+    command: ["nginx", "-g", "daemon off;"]
 ```
 
-```bash
-lxc-compose push <image>
-```
+## Contributing
+
+Contributions are welcome! Please feel free to submit a Pull Request.
