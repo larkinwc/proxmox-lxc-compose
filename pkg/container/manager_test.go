@@ -2,15 +2,12 @@ package container
 
 import (
 	"os"
-	"os/exec"
 	"path/filepath"
 	"testing"
 
 	"proxmox-lxc-compose/pkg/config"
 	"proxmox-lxc-compose/pkg/testutil"
 )
-
-var execCommand = exec.Command
 
 func TestPauseResume(t *testing.T) {
 	dir, cleanup := testutil.TempDir(t)
@@ -37,10 +34,16 @@ func TestPauseResume(t *testing.T) {
 	err = stateManager.SaveContainerState(containerName, &config.Container{}, "RUNNING")
 	testutil.AssertNoError(t, err)
 
-	t.Run("pause running container", func(t *testing.T) {
-		mock, cleanup := testutil.SetupMockCommand(&execCommand)
-		defer cleanup()
+	// Setup mock command
+	oldExecCommand := execCommand
+	defer func() { execCommand = oldExecCommand }()
+	mock, cleanup := testutil.SetupMockCommand(&execCommand)
+	defer cleanup()
 
+	// Ensure container exists and is running
+	mock.AddContainer(containerName, "RUNNING")
+
+	t.Run("pause running container", func(t *testing.T) {
 		err := manager.Pause(containerName)
 		testutil.AssertNoError(t, err)
 
@@ -60,9 +63,7 @@ func TestPauseResume(t *testing.T) {
 		// Set state to FROZEN first
 		err := stateManager.SaveContainerState(containerName, &config.Container{}, "FROZEN")
 		testutil.AssertNoError(t, err)
-
-		mock, cleanup := testutil.SetupMockCommand(&execCommand)
-		defer cleanup()
+		mock.SetContainerState(containerName, "FROZEN")
 
 		err = manager.Resume(containerName)
 		testutil.AssertNoError(t, err)
@@ -83,6 +84,7 @@ func TestPauseResume(t *testing.T) {
 		// Set state to STOPPED
 		err := stateManager.SaveContainerState(containerName, &config.Container{}, "STOPPED")
 		testutil.AssertNoError(t, err)
+		mock.SetContainerState(containerName, "STOPPED")
 
 		err = manager.Pause(containerName)
 		testutil.AssertError(t, err)
@@ -92,6 +94,7 @@ func TestPauseResume(t *testing.T) {
 		// Set state to RUNNING
 		err := stateManager.SaveContainerState(containerName, &config.Container{}, "RUNNING")
 		testutil.AssertNoError(t, err)
+		mock.SetContainerState(containerName, "RUNNING")
 
 		err = manager.Resume(containerName)
 		testutil.AssertError(t, err)

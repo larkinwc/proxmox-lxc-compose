@@ -15,6 +15,12 @@ build:
 test:
 	$(GOTEST) -v -race -cover ./...
 
+test-debug:
+	@$(GOTEST) -v ./... 2>&1 | awk '/=== RUN/{p=1}p' | awk '/ FAIL/{if(!f)print;f=1}!/FAIL/{print}' | grep -v "coverage:"
+
+test-fails:
+	@$(GOTEST) -v ./... 2>&1 | grep ": unexpected\|: expected" || true
+
 lint:
 	golangci-lint run
 

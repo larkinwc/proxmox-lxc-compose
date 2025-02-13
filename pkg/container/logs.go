@@ -5,8 +5,8 @@ import (
 	"fmt"
 	"io"
 	"os"
-	"os/exec"
 	"path/filepath"
+	"strings"
 	"time"
 )
 
@@ -56,11 +56,16 @@ func (m *LXCManager) GetLogs(name string, opts LogOptions) (io.ReadCloser, error
 
 				// Filter by timestamp if requested
 				if !opts.Since.IsZero() {
-					// Parse timestamp from line (format depends on your log format)
-					// For now, we'll just assume the timestamp is at the start of the line
-					if ts, err := time.Parse(time.RFC3339, line[:len(time.RFC3339)]); err == nil {
-						if ts.Before(opts.Since) {
-							continue
+					// Extract timestamp from brackets [TIMESTAMP]
+					if len(line) > 2 && line[0] == '[' {
+						closeBracket := strings.Index(line, "]")
+						if closeBracket > 0 {
+							tsStr := line[1:closeBracket]
+							if ts, err := time.Parse(time.RFC3339, tsStr); err == nil {
+								if ts.Before(opts.Since) {
+									continue
+								}
+							}
 						}
 					}
 				}
@@ -88,7 +93,7 @@ func (m *LXCManager) GetLogs(name string, opts LogOptions) (io.ReadCloser, error
 	}
 
 	// For following logs, use lxc-attach to tail the log file
-	cmd := exec.Command("lxc-attach", "-n", name, "--", "tail", "-f", "/var/log/console.log")
+	cmd := execCommand("lxc-attach", "-n", name, "--", "tail", "-f", "/var/log/console.log")
 	stdout, err := cmd.StdoutPipe()
 	if err != nil {
 		return nil, fmt.Errorf("failed to get stdout pipe: %w", err)

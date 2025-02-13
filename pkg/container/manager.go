@@ -160,7 +160,7 @@ func (m *LXCManager) List() ([]Container, error) {
 
 // Get implements Manager.Get
 func (m *LXCManager) Get(name string) (*Container, error) {
-	cmd := exec.Command("lxc-info", "-n", name)
+	cmd := execCommand("lxc-info", "-n", name)
 	output, err := cmd.Output()
 	if err != nil {
 		return nil, fmt.Errorf("failed to get container info: %w", err)
@@ -205,7 +205,7 @@ func (m *LXCManager) Pause(name string) error {
 	}
 
 	// Freeze the container
-	cmd := exec.Command("lxc-freeze", "-n", name)
+	cmd := execCommand("lxc-freeze", "-n", name)
 	if err := cmd.Run(); err != nil {
 		return fmt.Errorf("failed to pause container: %w", err)
 	}
@@ -231,7 +231,7 @@ func (m *LXCManager) Resume(name string) error {
 	}
 
 	// Unfreeze the container
-	cmd := exec.Command("lxc-unfreeze", "-n", name)
+	cmd := execCommand("lxc-unfreeze", "-n", name)
 	if err := cmd.Run(); err != nil {
 		return fmt.Errorf("failed to resume container: %w", err)
 	}
