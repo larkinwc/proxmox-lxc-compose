@@ -42,6 +42,9 @@ func TestGetLogs(t *testing.T) {
 	}
 
 	t.Run("reads all logs", func(t *testing.T) {
+		_, cleanup := testutil.SetupMockCommand(&execCommand)
+		defer cleanup()
+
 		logs, err := manager.GetLogs(containerName, LogOptions{})
 		testutil.AssertNoError(t, err)
 		defer logs.Close()

@@ -57,9 +57,9 @@ services:
 			t.Fatal("CPU config is nil")
 		}
 		cores := 2
-		testutil.AssertEqual(t, &cores, web.CPU.Cores)
+		testutil.AssertEqual(t, cores, *web.CPU.Cores)
 		shares := int64(1024)
-		testutil.AssertEqual(t, &shares, web.CPU.Shares)
+		testutil.AssertEqual(t, shares, *web.CPU.Shares)
 
 		// Verify memory config
 		if web.Memory == nil {

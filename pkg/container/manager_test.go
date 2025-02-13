@@ -10,21 +10,7 @@ import (
 	"proxmox-lxc-compose/pkg/testutil"
 )
 
-type mockCmd struct {
-	name string
-	args []string
-}
-
 var execCommand = exec.Command
-
-// mockExecCommand replaces exec.Command for testing
-func mockExecCommand(mock *mockCmd) func(name string, args ...string) *exec.Cmd {
-	return func(name string, args ...string) *exec.Cmd {
-		mock.name = name
-		mock.args = args
-		return exec.Command("echo", "mock") // Just use echo as a dummy command
-	}
-}
 
 func TestPauseResume(t *testing.T) {
 	dir, cleanup := testutil.TempDir(t)
@@ -52,18 +38,16 @@ func TestPauseResume(t *testing.T) {
 	testutil.AssertNoError(t, err)
 
 	t.Run("pause running container", func(t *testing.T) {
-		mock := &mockCmd{}
-		oldExec := execCommand
-		execCommand = mockExecCommand(mock)
-		defer func() { execCommand = oldExec }()
+		mock, cleanup := testutil.SetupMockCommand(&execCommand)
+		defer cleanup()
 
 		err := manager.Pause(containerName)
 		testutil.AssertNoError(t, err)
 
 		// Verify lxc-freeze was called correctly
-		testutil.AssertEqual(t, "lxc-freeze", mock.name)
-		if len(mock.args) != 2 || mock.args[0] != "-n" || mock.args[1] != containerName {
-			t.Fatalf("unexpected args: %v", mock.args)
+		testutil.AssertEqual(t, "lxc-freeze", mock.Name)
+		if len(mock.Args) != 2 || mock.Args[0] != "-n" || mock.Args[1] != containerName {
+			t.Fatalf("unexpected args: %v", mock.Args)
 		}
 
 		// Verify state was updated
@@ -77,18 +61,16 @@ func TestPauseResume(t *testing.T) {
 		err := stateManager.SaveContainerState(containerName, &config.Container{}, "FROZEN")
 		testutil.AssertNoError(t, err)
 
-		mock := &mockCmd{}
-		oldExec := execCommand
-		execCommand = mockExecCommand(mock)
-		defer func() { execCommand = oldExec }()
+		mock, cleanup := testutil.SetupMockCommand(&execCommand)
+		defer cleanup()
 
 		err = manager.Resume(containerName)
 		testutil.AssertNoError(t, err)
 
 		// Verify lxc-unfreeze was called correctly
-		testutil.AssertEqual(t, "lxc-unfreeze", mock.name)
-		if len(mock.args) != 2 || mock.args[0] != "-n" || mock.args[1] != containerName {
-			t.Fatalf("unexpected args: %v", mock.args)
+		testutil.AssertEqual(t, "lxc-unfreeze", mock.Name)
+		if len(mock.Args) != 2 || mock.Args[0] != "-n" || mock.Args[1] != containerName {
+			t.Fatalf("unexpected args: %v", mock.Args)
 		}
 
 		// Verify state was updated
