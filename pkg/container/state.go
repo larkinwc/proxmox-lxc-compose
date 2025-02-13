@@ -68,6 +68,12 @@ func (sm *StateManager) SaveContainerState(name string, cfg *config.Container, s
 	} else if status == "STOPPED" {
 		state.LastStoppedAt = &now
 	}
+
+	// Update config if provided
+	if cfg != nil {
+		state.Config = cfg
+	}
+
 	state.Status = status
 
 	return sm.saveState(name, state)

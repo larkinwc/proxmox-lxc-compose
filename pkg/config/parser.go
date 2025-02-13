@@ -4,6 +4,9 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"regexp"
+
+	"proxmox-lxc-compose/pkg/validation"
 
 	"gopkg.in/yaml.v3"
 )
@@ -61,5 +64,24 @@ func validateContainer(name string, container *Container) error {
 		return fmt.Errorf("service '%s' must specify an image", name)
 	}
 
+	// Apply storage defaults
+	if container.Storage == nil {
+		container.Storage = container.DefaultStorageConfig()
+	}
+
+	// Validate container configuration
+	if err := validateContainerConfig(container); err != nil {
+		return fmt.Errorf("service '%s' has invalid configuration: %w", name, err)
+	}
+
 	return nil
 }
+
+// validateStorageSize validates a storage size string
+func validateStorageSize(size string) error {
+	_, err := validation.ValidateStorageSize(size)
+	return err
+}
+
+// Regular expression for validating storage size format
+var sizeRegex = regexp.MustCompile(`(?i)^\d+[BKMGTP]B?$`)

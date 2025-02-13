@@ -155,12 +155,35 @@ func (m *LXCManager) applyStorageConfig(f *os.File, cfg *config.StorageConfig) e
 		return nil
 	}
 
+	// Apply root storage configuration
 	if cfg.Root != "" {
 		if err := writeConfig(f, "lxc.rootfs.size", cfg.Root); err != nil {
 			return err
 		}
 	}
 
+	// Apply storage backend configuration
+	if cfg.Backend != "" {
+		if err := writeConfig(f, "lxc.rootfs.backend", cfg.Backend); err != nil {
+			return err
+		}
+	}
+
+	// Apply storage pool configuration if specified
+	if cfg.Pool != "" {
+		if err := writeConfig(f, "lxc.rootfs.pool", cfg.Pool); err != nil {
+			return err
+		}
+	}
+
+	// Configure automount if enabled
+	if cfg.AutoMount {
+		if err := writeConfig(f, "lxc.rootfs.mount.auto", "1"); err != nil {
+			return err
+		}
+	}
+
+	// Apply additional mounts
 	for i, mount := range cfg.Mounts {
 		prefix := fmt.Sprintf("lxc.mount.entry.%d", i)
 

@@ -14,6 +14,33 @@ type MockCommandState struct {
 	ContainerStates map[string]string
 	tmpFiles        []string
 	debug           bool
+	commandHistory  []struct {
+		name string
+		args []string
+	}
+}
+
+// CommandWasCalled checks if a command was called with the given name and arguments
+func (m *MockCommandState) CommandWasCalled(name string, args ...string) bool {
+	for _, cmd := range m.commandHistory {
+		if cmd.name != name {
+			continue
+		}
+		if len(cmd.args) != len(args) {
+			continue
+		}
+		match := true
+		for i, arg := range args {
+			if cmd.args[i] != arg {
+				match = false
+				break
+			}
+		}
+		if match {
+			return true
+		}
+	}
+	return false
 }
 
 // SetupMockCommand sets up command mocking and returns a cleanup function
@@ -22,6 +49,10 @@ func SetupMockCommand(execCommand *func(string, ...string) *exec.Cmd) (*MockComm
 		ContainerStates: make(map[string]string),
 		tmpFiles:        make([]string, 0),
 		debug:           true, // Enable debug by default
+		commandHistory: make([]struct {
+			name string
+			args []string
+		}, 0),
 	}
 	oldExec := *execCommand
 
@@ -33,6 +64,10 @@ func SetupMockCommand(execCommand *func(string, ...string) *exec.Cmd) (*MockComm
 
 		mock.Name = name
 		mock.Args = args
+		mock.commandHistory = append(mock.commandHistory, struct {
+			name string
+			args []string
+		}{name, args})
 
 		// For lxc-info, return a mock response based on the container name
 		if name == "lxc-info" {
@@ -45,7 +80,7 @@ func SetupMockCommand(execCommand *func(string, ...string) *exec.Cmd) (*MockComm
 				if mock.debug {
 					fmt.Printf("DEBUG: lxc-info failed: invalid args: %v\n", args)
 				}
-				return exec.Command("false")
+				return exec.Command("sh", "-c", fmt.Sprintf("echo 'Invalid arguments' >&2; exit 2"))
 			}
 
 			containerName := args[1]
@@ -57,28 +92,22 @@ func SetupMockCommand(execCommand *func(string, ...string) *exec.Cmd) (*MockComm
 				if mock.debug {
 					fmt.Printf("DEBUG: lxc-info failed: nonexistent container: %s\n", containerName)
 				}
-				return exec.Command("false")
+				return exec.Command("sh", "-c", fmt.Sprintf("echo 'Container does not exist' >&2; exit 2"))
 			}
 
 			state, exists := mock.ContainerStates[containerName]
 			if !exists {
 				if mock.debug {
 					fmt.Printf("DEBUG: lxc-info failed: container not found in state map: %s\n", containerName)
-					fmt.Printf("DEBUG: Available containers: %v\n", mock.ContainerStates)
 				}
-				return exec.Command("false")
+				return exec.Command("sh", "-c", fmt.Sprintf("echo 'Container does not exist' >&2; exit 2"))
 			}
 
 			if mock.debug {
 				fmt.Printf("DEBUG: Creating mock script for container %s with state %s\n", containerName, state)
 			}
 
-			script := fmt.Sprintf(`#!/bin/sh
-echo "Name: %s"
-echo "State: %s"
-echo "PID: 12345"
-`, containerName, state)
-
+			// Create a temporary file for the script
 			tmpfile, err := os.CreateTemp("", "mock-lxc-info-*.sh")
 			if err != nil {
 				if mock.debug {
@@ -87,6 +116,24 @@ echo "PID: 12345"
 				panic(err)
 			}
 			mock.tmpFiles = append(mock.tmpFiles, tmpfile.Name())
+
+			// Write the script content
+			script := fmt.Sprintf(`#!/bin/sh
+cat << EOF
+Name: %s
+State: %s
+PID: 12345
+IP: 192.168.1.100
+CPU use: 1.23
+Memory use: 123.45 MiB
+KMem use: 12.34 MiB
+Link: vethXYZ123
+TX bytes: 1234567 bytes
+RX bytes: 7654321 bytes
+Total bytes: 8888888 bytes
+EOF
+exit 0
+`, containerName, state)
 
 			if err := os.WriteFile(tmpfile.Name(), []byte(script), 0755); err != nil {
 				if mock.debug {
@@ -113,7 +160,7 @@ echo "PID: 12345"
 				if mock.debug {
 					fmt.Printf("DEBUG: lxc-attach failed: invalid args: %v\n", args)
 				}
-				return exec.Command("false")
+				return exec.Command("sh", "-c", "exit 2")
 			}
 
 			containerName := args[1]
@@ -121,14 +168,14 @@ echo "PID: 12345"
 				if mock.debug {
 					fmt.Printf("DEBUG: lxc-attach failed: nonexistent container: %s\n", containerName)
 				}
-				return exec.Command("false")
+				return exec.Command("sh", "-c", "exit 2")
 			}
 
 			if _, exists := mock.ContainerStates[containerName]; !exists {
 				if mock.debug {
 					fmt.Printf("DEBUG: lxc-attach failed: container not found in state map: %s\n", containerName)
 				}
-				return exec.Command("false")
+				return exec.Command("sh", "-c", "exit 2")
 			}
 
 			script := `#!/bin/sh
@@ -169,7 +216,7 @@ sleep 0.1
 				if mock.debug {
 					fmt.Printf("DEBUG: %s failed: invalid args: %v\n", name, args)
 				}
-				return exec.Command("false")
+				return exec.Command("sh", "-c", fmt.Sprintf("echo 'Invalid arguments' >&2; exit 2"))
 			}
 
 			containerName := args[1]
@@ -177,35 +224,107 @@ sleep 0.1
 				if mock.debug {
 					fmt.Printf("DEBUG: %s failed: nonexistent container: %s\n", name, containerName)
 				}
-				return exec.Command("false")
+				return exec.Command("sh", "-c", fmt.Sprintf("echo 'Container does not exist' >&2; exit 2"))
 			}
 
-			if _, exists := mock.ContainerStates[containerName]; !exists {
+			state, exists := mock.ContainerStates[containerName]
+			if !exists {
 				if mock.debug {
 					fmt.Printf("DEBUG: %s failed: container not found in state map: %s\n", name, containerName)
 				}
-				return exec.Command("false")
+				return exec.Command("sh", "-c", fmt.Sprintf("echo 'Container does not exist' >&2; exit 2"))
 			}
 
 			// Update container state
 			if name == "lxc-freeze" {
+				if state != "RUNNING" {
+					if mock.debug {
+						fmt.Printf("DEBUG: %s failed: container is not running (current state: %s)\n", name, state)
+					}
+					return exec.Command("sh", "-c", fmt.Sprintf("echo 'Container is not running (current state: %s)' >&2; exit 1", state))
+				}
 				mock.ContainerStates[containerName] = "FROZEN"
+				if mock.debug {
+					fmt.Printf("DEBUG: %s succeeded: new state for %s: %s\n", name, containerName, mock.ContainerStates[containerName])
+				}
+				return exec.Command("sh", "-c", "exit 0")
 			} else {
+				if state != "FROZEN" {
+					if mock.debug {
+						fmt.Printf("DEBUG: %s failed: container is not frozen (current state: %s)\n", name, state)
+					}
+					return exec.Command("sh", "-c", fmt.Sprintf("echo 'Container is not frozen (current state: %s)' >&2; exit 1", state))
+				}
 				mock.ContainerStates[containerName] = "RUNNING"
+				if mock.debug {
+					fmt.Printf("DEBUG: %s succeeded: new state for %s: %s\n", name, containerName, mock.ContainerStates[containerName])
+				}
+				return exec.Command("sh", "-c", "exit 0")
 			}
-
-			if mock.debug {
-				fmt.Printf("DEBUG: %s succeeded: new state for %s: %s\n", name, containerName, mock.ContainerStates[containerName])
-			}
-
-			return exec.Command("true")
 		}
 
-		// For any other command, just echo mock
+		// For lxc-start and lxc-stop, check container name and update state
+		if name == "lxc-start" || name == "lxc-stop" {
+			if mock.debug {
+				fmt.Printf("DEBUG: Processing %s command\n", name)
+			}
+
+			if len(args) < 2 || args[0] != "-n" {
+				if mock.debug {
+					fmt.Printf("DEBUG: %s failed: invalid args: %v\n", name, args)
+				}
+				return exec.Command("sh", "-c", fmt.Sprintf("echo 'Invalid arguments' >&2; exit 2"))
+			}
+
+			containerName := args[1]
+			if containerName == "nonexistent" {
+				if mock.debug {
+					fmt.Printf("DEBUG: %s failed: nonexistent container: %s\n", name, containerName)
+				}
+				return exec.Command("sh", "-c", fmt.Sprintf("echo 'Container does not exist' >&2; exit 2"))
+			}
+
+			state, exists := mock.ContainerStates[containerName]
+			if !exists {
+				if mock.debug {
+					fmt.Printf("DEBUG: %s failed: container not found in state map: %s\n", name, containerName)
+				}
+				return exec.Command("sh", "-c", fmt.Sprintf("echo 'Container does not exist' >&2; exit 2"))
+			}
+
+			// Update container state
+			if name == "lxc-start" {
+				if state != "STOPPED" {
+					if mock.debug {
+						fmt.Printf("DEBUG: %s failed: container is not stopped (current state: %s)\n", name, state)
+					}
+					return exec.Command("sh", "-c", fmt.Sprintf("echo 'Container is not stopped (current state: %s)' >&2; exit 1", state))
+				}
+				mock.ContainerStates[containerName] = "RUNNING"
+				if mock.debug {
+					fmt.Printf("DEBUG: %s succeeded: new state for %s: %s\n", name, containerName, mock.ContainerStates[containerName])
+				}
+				return exec.Command("sh", "-c", "exit 0")
+			} else {
+				if state != "RUNNING" && state != "FROZEN" {
+					if mock.debug {
+						fmt.Printf("DEBUG: %s failed: container is not running or frozen (current state: %s)\n", name, state)
+					}
+					return exec.Command("sh", "-c", fmt.Sprintf("echo 'Container is not running or frozen (current state: %s)' >&2; exit 1", state))
+				}
+				mock.ContainerStates[containerName] = "STOPPED"
+				if mock.debug {
+					fmt.Printf("DEBUG: %s succeeded: new state for %s: %s\n", name, containerName, mock.ContainerStates[containerName])
+				}
+				return exec.Command("sh", "-c", "exit 0")
+			}
+		}
+
+		// For any other command, just return success
 		if mock.debug {
 			fmt.Printf("DEBUG: Unhandled command: %s %s\n", name, strings.Join(args, " "))
 		}
-		return exec.Command("echo", strings.Join(append([]string{name}, args...), " "))
+		return exec.Command("sh", "-c", "exit 0")
 	}
 
 	return mock, func() {
@@ -231,7 +350,7 @@ func (m *MockCommandState) SetContainerState(containerName, state string) {
 	m.ContainerStates[containerName] = state
 }
 
-// AddContainer adds a new container with the given state
+// AddContainer adds a container to the mock state with the given state
 func (m *MockCommandState) AddContainer(containerName, state string) {
 	if m.debug {
 		fmt.Printf("DEBUG: Adding container %s with state %s\n", containerName, state)
@@ -242,4 +361,15 @@ func (m *MockCommandState) AddContainer(containerName, state string) {
 // SetDebug enables or disables debug logging
 func (m *MockCommandState) SetDebug(enabled bool) {
 	m.debug = enabled
+}
+
+// GetContainerState returns the state of a container
+func (m *MockCommandState) GetContainerState(containerName string) (string, bool) {
+	state, exists := m.ContainerStates[containerName]
+	return state, exists
+}
+
+// RemoveContainer removes a container from the mock state
+func (m *MockCommandState) RemoveContainer(containerName string) {
+	delete(m.ContainerStates, containerName)
 }
