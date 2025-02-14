@@ -125,6 +125,10 @@ func TestFollowLogs(t *testing.T) {
 	err = os.WriteFile(logPath, []byte{}, 0644)
 	AssertNoError(t, err)
 
+	// Set config path for mock command
+	os.Setenv("CONTAINER_CONFIG_PATH", dir)
+	defer os.Unsetenv("CONTAINER_CONFIG_PATH")
+
 	// Create state manager
 	statePath := filepath.Join(dir, "state")
 	stateManager, err := NewStateManager(statePath)

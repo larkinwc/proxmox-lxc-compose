@@ -6,6 +6,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
+	"time"
 
 	"proxmox-lxc-compose/pkg/config"
 )
@@ -61,8 +62,19 @@ func (m *LXCManager) execLXCCommand(name string, args ...string) error {
 	cmd := execCommand(name, args...)
 	output, err := cmd.CombinedOutput()
 	if err != nil {
-		if len(output) > 0 {
-			return fmt.Errorf("%s", output)
+		outputStr := strings.TrimSpace(string(output))
+		if len(outputStr) > 0 {
+			// Parse common LXC error messages
+			if strings.Contains(outputStr, "not found") {
+				return fmt.Errorf("container not found")
+			}
+			if strings.Contains(outputStr, "already running") {
+				return fmt.Errorf("container is already running")
+			}
+			if strings.Contains(outputStr, "not running") {
+				return fmt.Errorf("container is not running")
+			}
+			return fmt.Errorf("%s", outputStr)
 		}
 		return err
 	}
@@ -147,6 +159,7 @@ func (m *LXCManager) Start(name string) error {
 		return fmt.Errorf("failed to update container state: %w", err)
 	}
 
+	fmt.Printf("DEBUG: Container '%s' started successfully\n", name)
 	return nil
 }
 
@@ -186,6 +199,7 @@ func (m *LXCManager) Stop(name string) error {
 		return fmt.Errorf("failed to update container state: %w", err)
 	}
 
+	fmt.Printf("DEBUG: Container '%s' stopped successfully\n", name)
 	return nil
 }
 
@@ -254,24 +268,39 @@ func (m *LXCManager) Get(name string) (*Container, error) {
 		}
 	}
 
-	// Get container state from lxc-info
-	cmd := execCommand("lxc-info", "-n", name)
-	output, err := cmd.CombinedOutput()
-	if err == nil {
-		// Parse lxc-info output to get state
-		for _, line := range strings.Split(string(output), "\n") {
-			if strings.HasPrefix(line, "State:") {
-				lxcState := strings.TrimSpace(strings.TrimPrefix(line, "State:"))
-				switch strings.ToUpper(lxcState) {
-				case "RUNNING":
-					state.Status = "RUNNING"
-				case "STOPPED":
-					state.Status = "STOPPED"
-				case "FROZEN":
-					state.Status = "FROZEN"
+	// Try up to 3 times to get a stable state
+	for i := 0; i < 3; i++ {
+		cmd := execCommand("lxc-info", "-n", name)
+		output, err := cmd.CombinedOutput()
+		if err == nil {
+			currentState := ""
+			// Parse lxc-info output to get state
+			for _, line := range strings.Split(string(output), "\n") {
+				if strings.HasPrefix(line, "State:") {
+					lxcState := strings.TrimSpace(strings.TrimPrefix(line, "State:"))
+					switch strings.ToUpper(lxcState) {
+					case "RUNNING":
+						currentState = "RUNNING"
+					case "STOPPED":
+						currentState = "STOPPED"
+					case "FROZEN":
+						currentState = "FROZEN"
+					}
+					break
 				}
+			}
+
+			// If we got a valid state that matches our saved state or we've tried 3 times,
+			// use this state
+			if currentState != "" && (currentState == state.Status || i == 2) {
+				state.Status = currentState
 				break
 			}
+		}
+
+		// Wait a short time before retrying
+		if i < 2 {
+			time.Sleep(100 * time.Millisecond)
 		}
 	}
 

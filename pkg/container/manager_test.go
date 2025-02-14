@@ -4,6 +4,7 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+	"time"
 
 	"proxmox-lxc-compose/pkg/config"
 	"proxmox-lxc-compose/pkg/internal/mock"
@@ -271,6 +272,147 @@ func TestUpdate(t *testing.T) {
 
 	t.Run("update_nonexistent_container", func(t *testing.T) {
 		err := manager.Update("nonexistent", &config.Container{})
+		AssertError(t, err)
+	})
+}
+
+func TestStartStop(t *testing.T) {
+	containerName := "test-container-startstop"
+	configPath := t.TempDir()
+
+	// Create state directory
+	statePath := filepath.Join(configPath, "state")
+	err := os.MkdirAll(statePath, 0755)
+	AssertNoError(t, err)
+
+	// Set config path for mock command
+	os.Setenv("CONTAINER_CONFIG_PATH", configPath)
+	defer os.Unsetenv("CONTAINER_CONFIG_PATH")
+
+	mock, cleanup := mock.SetupMockCommand(&execCommand)
+	defer cleanup()
+
+	manager, err := NewLXCManager(configPath)
+	AssertNoError(t, err)
+
+	t.Run("start_stopped_container", func(t *testing.T) {
+		// Create container directory and initialize state
+		containerDir := filepath.Join(configPath, containerName)
+		err = os.MkdirAll(containerDir, 0755)
+		AssertNoError(t, err)
+
+		// Enable debug logging
+		mock.SetDebug(true)
+
+		mock.AddContainer(containerName, "STOPPED")
+		err = manager.state.SaveContainerState(containerName, &config.Container{}, "STOPPED")
+		AssertNoError(t, err)
+
+		// Verify initial state
+		container, err := manager.Get(containerName)
+		AssertNoError(t, err)
+		AssertEqual(t, "STOPPED", container.State)
+
+		// Add a small delay to ensure state is properly saved
+		time.Sleep(100 * time.Millisecond)
+
+		// Start container
+		err = manager.Start(containerName)
+		AssertNoError(t, err)
+
+		// Verify final state
+		container, err = manager.Get(containerName)
+		AssertNoError(t, err)
+		AssertEqual(t, "RUNNING", container.State)
+	})
+
+	t.Run("start_running_container", func(t *testing.T) {
+		mock.AddContainer(containerName, "RUNNING")
+		err = manager.state.SaveContainerState(containerName, &config.Container{}, "RUNNING")
+		AssertNoError(t, err)
+
+		// Verify initial state
+		container, err := manager.Get(containerName)
+		AssertNoError(t, err)
+		AssertEqual(t, "RUNNING", container.State)
+
+		// Try to start an already running container
+		err = manager.Start(containerName)
+		AssertError(t, err)
+
+		// Verify state hasn't changed
+		container, err = manager.Get(containerName)
+		AssertNoError(t, err)
+		AssertEqual(t, "RUNNING", container.State)
+	})
+
+	t.Run("start_frozen_container", func(t *testing.T) {
+		mock.AddContainer(containerName, "FROZEN")
+		err = manager.state.SaveContainerState(containerName, &config.Container{}, "FROZEN")
+		AssertNoError(t, err)
+
+		// Verify initial state
+		container, err := manager.Get(containerName)
+		AssertNoError(t, err)
+		AssertEqual(t, "FROZEN", container.State)
+
+		// Try to start a frozen container
+		err = manager.Start(containerName)
+		AssertError(t, err)
+
+		// Verify state hasn't changed
+		container, err = manager.Get(containerName)
+		AssertNoError(t, err)
+		AssertEqual(t, "FROZEN", container.State)
+	})
+
+	t.Run("stop_running_container", func(t *testing.T) {
+		mock.AddContainer(containerName, "RUNNING")
+		err = manager.state.SaveContainerState(containerName, &config.Container{}, "RUNNING")
+		AssertNoError(t, err)
+
+		// Verify initial state
+		container, err := manager.Get(containerName)
+		AssertNoError(t, err)
+		AssertEqual(t, "RUNNING", container.State)
+
+		// Stop container
+		err = manager.Stop(containerName)
+		AssertNoError(t, err)
+
+		// Verify final state
+		container, err = manager.Get(containerName)
+		AssertNoError(t, err)
+		AssertEqual(t, "STOPPED", container.State)
+	})
+
+	t.Run("stop_stopped_container", func(t *testing.T) {
+		mock.AddContainer(containerName, "STOPPED")
+		err = manager.state.SaveContainerState(containerName, &config.Container{}, "STOPPED")
+		AssertNoError(t, err)
+
+		// Verify initial state
+		container, err := manager.Get(containerName)
+		AssertNoError(t, err)
+		AssertEqual(t, "STOPPED", container.State)
+
+		// Try to stop an already stopped container
+		err = manager.Stop(containerName)
+		AssertError(t, err)
+
+		// Verify state hasn't changed
+		container, err = manager.Get(containerName)
+		AssertNoError(t, err)
+		AssertEqual(t, "STOPPED", container.State)
+	})
+
+	t.Run("stop_nonexistent_container", func(t *testing.T) {
+		err := manager.Stop("nonexistent")
+		AssertError(t, err)
+	})
+
+	t.Run("start_nonexistent_container", func(t *testing.T) {
+		err := manager.Start("nonexistent")
 		AssertError(t, err)
 	})
 }
