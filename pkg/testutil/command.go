@@ -1,6 +1,7 @@
 package testutil
 
 import (
+	"bytes"
 	"encoding/json"
 	"fmt"
 	"os"
@@ -374,4 +375,67 @@ func (m *MockCommandState) ContainerExists(containerName string) bool {
 
 	_, exists := m.ContainerStates[containerName]
 	return exists
+}
+
+// MockCommandExecutor mocks command execution for testing
+type MockCommandExecutor struct {
+	commands   map[string][]byte
+	errorCmds  map[string]error
+	actualExec bool
+}
+
+// NewMockCommandExecutor creates a new mock command executor
+func NewMockCommandExecutor() *MockCommandExecutor {
+	return &MockCommandExecutor{
+		commands:  make(map[string][]byte),
+		errorCmds: make(map[string]error),
+	}
+}
+
+// AddMockCommand adds a mock command response
+func (m *MockCommandExecutor) AddMockCommand(cmd string, output []byte) {
+	m.commands[cmd] = output
+}
+
+// AddMockError adds a mock command error
+func (m *MockCommandExecutor) AddMockError(cmd string, err error) {
+	m.errorCmds[cmd] = err
+}
+
+// SetActualExecution enables actual command execution for unmocked commands
+func (m *MockCommandExecutor) SetActualExecution(enabled bool) {
+	m.actualExec = enabled
+}
+
+// Command creates a mocked exec.Command
+func (m *MockCommandExecutor) Command(name string, args ...string) *exec.Cmd {
+	cmdStr := name
+	if len(args) > 0 {
+		cmdStr = name + " " + strings.Join(args, " ")
+	}
+
+	if err, ok := m.errorCmds[cmdStr]; ok {
+		// Create a failing command that writes error to stderr
+		cmd := exec.Command("sh", "-c", "exit 1")
+		cmd.Stderr = bytes.NewBuffer([]byte(err.Error()))
+		return cmd
+	}
+
+	// For successful commands, create a shell command that outputs the mock data
+	if output, ok := m.commands[cmdStr]; ok {
+		cmd := exec.Command("sh", "-c", "cat")
+		stdin, _ := cmd.StdinPipe()
+		go func() {
+			defer stdin.Close()
+			stdin.Write(output)
+		}()
+		return cmd
+	}
+
+	if m.actualExec {
+		return exec.Command(name, args...)
+	}
+
+	// Default: success with no output
+	return exec.Command("true")
 }

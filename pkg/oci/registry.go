@@ -5,14 +5,21 @@ import (
 	"context"
 	"fmt"
 	"os/exec"
+	"time"
 
 	"proxmox-lxc-compose/pkg/errors"
 	"proxmox-lxc-compose/pkg/internal/recovery"
 	"proxmox-lxc-compose/pkg/logging"
 )
 
+// execCommand is a variable that allows us to mock exec.Command during tests
+var execCommand = exec.Command
+
 type RegistryManager struct {
 	store *LocalImageStore
+	// Add cleanup interval
+	cleanupInterval time.Duration
+	stopCleanup     chan struct{}
 }
 
 func NewRegistryManager(storageDir string) (*RegistryManager, error) {
@@ -20,18 +27,28 @@ func NewRegistryManager(storageDir string) (*RegistryManager, error) {
 	if err != nil {
 		return nil, err
 	}
-	return &RegistryManager{store: store}, nil
+
+	manager := &RegistryManager{
+		store:           store,
+		cleanupInterval: 1 * time.Hour,
+		stopCleanup:     make(chan struct{}),
+	}
+
+	// Start cleanup goroutine
+	go manager.cleanupLoop()
+
+	return manager, nil
 }
 
 func (m *RegistryManager) Pull(ctx context.Context, ref ImageReference) error {
 	return recovery.RetryWithBackoff(ctx, recovery.DefaultRetryConfig, func() error {
-		logging.Info("Pulling image", 
+		logging.Info("Pulling image",
 			"registry", ref.Registry,
 			"repository", ref.Repository,
 			"tag", ref.Tag)
 
 		// Use docker to pull the image
-		pullCmd := exec.CommandContext(ctx, "docker", "pull", formatDockerRef(ref))
+		pullCmd := execCommand("docker", "pull", formatDockerRef(ref))
 		if out, err := pullCmd.CombinedOutput(); err != nil {
 			return errors.Wrap(err, errors.ErrRegistry, "failed to pull image").
 				WithDetails(map[string]interface{}{
@@ -42,7 +59,7 @@ func (m *RegistryManager) Pull(ctx context.Context, ref ImageReference) error {
 
 		// Save the image to a tar
 		logging.Debug("Saving image to tar")
-		saveCmd := exec.CommandContext(ctx, "docker", "save", formatDockerRef(ref))
+		saveCmd := execCommand("docker", "save", formatDockerRef(ref))
 		data, err := saveCmd.Output()
 		if err != nil {
 			return errors.Wrap(err, errors.ErrRegistry, "failed to save image")
@@ -62,7 +79,7 @@ func (m *RegistryManager) Pull(ctx context.Context, ref ImageReference) error {
 
 func (m *RegistryManager) Push(ctx context.Context, ref ImageReference) error {
 	return recovery.RetryWithBackoff(ctx, recovery.DefaultRetryConfig, func() error {
-		logging.Info("Pushing image", 
+		logging.Info("Pushing image",
 			"registry", ref.Registry,
 			"repository", ref.Repository,
 			"tag", ref.Tag)
@@ -76,7 +93,7 @@ func (m *RegistryManager) Push(ctx context.Context, ref ImageReference) error {
 
 		// Load into docker
 		logging.Debug("Loading image into docker")
-		loadCmd := exec.CommandContext(ctx, "docker", "load")
+		loadCmd := execCommand("docker", "load")
 		loadCmd.Stdin = bytes.NewReader(data)
 		if out, err := loadCmd.CombinedOutput(); err != nil {
 			return errors.Wrap(err, errors.ErrRegistry, "failed to load image").
@@ -88,7 +105,7 @@ func (m *RegistryManager) Push(ctx context.Context, ref ImageReference) error {
 
 		// Push to registry
 		logging.Debug("Pushing image to registry")
-		pushCmd := exec.CommandContext(ctx, "docker", "push", formatDockerRef(ref))
+		pushCmd := execCommand("docker", "push", formatDockerRef(ref))
 		if out, err := pushCmd.CombinedOutput(); err != nil {
 			return errors.Wrap(err, errors.ErrRegistry, "failed to push image").
 				WithDetails(map[string]interface{}{
@@ -104,20 +121,20 @@ func (m *RegistryManager) Push(ctx context.Context, ref ImageReference) error {
 }
 
 func (m *RegistryManager) Save(ctx context.Context, ref ImageReference) error {
-	logging.Info("Saving image", 
+	logging.Info("Saving image",
 		"registry", ref.Registry,
 		"repository", ref.Repository,
 		"tag", ref.Tag)
 
 	// Check if image exists in docker
-	inspectCmd := exec.CommandContext(ctx, "docker", "inspect", formatDockerRef(ref))
+	inspectCmd := execCommand("docker", "inspect", formatDockerRef(ref))
 	if err := inspectCmd.Run(); err != nil {
 		return errors.Wrap(err, errors.ErrRegistry, "image not found in docker")
 	}
 
 	// Save the image to a tar
 	logging.Debug("Saving image to tar")
-	saveCmd := exec.CommandContext(ctx, "docker", "save", formatDockerRef(ref))
+	saveCmd := execCommand("docker", "save", formatDockerRef(ref))
 	data, err := saveCmd.Output()
 	if err != nil {
 		return errors.Wrap(err, errors.ErrRegistry, "failed to save image")
@@ -135,7 +152,7 @@ func (m *RegistryManager) Save(ctx context.Context, ref ImageReference) error {
 }
 
 func (m *RegistryManager) Load(ctx context.Context, ref ImageReference) error {
-	logging.Info("Loading image", 
+	logging.Info("Loading image",
 		"registry", ref.Registry,
 		"repository", ref.Repository,
 		"tag", ref.Tag)
@@ -149,7 +166,7 @@ func (m *RegistryManager) Load(ctx context.Context, ref ImageReference) error {
 
 	// Load into docker
 	logging.Debug("Loading image into docker")
-	loadCmd := exec.CommandContext(ctx, "docker", "load")
+	loadCmd := execCommand("docker", "load")
 	loadCmd.Stdin = bytes.NewReader(data)
 	if out, err := loadCmd.CombinedOutput(); err != nil {
 		return errors.Wrap(err, errors.ErrRegistry, "failed to load image").
@@ -177,13 +194,13 @@ func (m *RegistryManager) List(ctx context.Context) ([]ImageReference, error) {
 }
 
 func (m *RegistryManager) Delete(ctx context.Context, ref ImageReference) error {
-	logging.Info("Deleting image", 
+	logging.Info("Deleting image",
 		"registry", ref.Registry,
 		"repository", ref.Repository,
 		"tag", ref.Tag)
 
 	// Remove from docker
-	rmiCmd := exec.CommandContext(ctx, "docker", "rmi", formatDockerRef(ref))
+	rmiCmd := execCommand("docker", "rmi", formatDockerRef(ref))
 	if out, err := rmiCmd.CombinedOutput(); err != nil {
 		return errors.Wrap(err, errors.ErrRegistry, "failed to remove docker image").
 			WithDetails(map[string]interface{}{
@@ -201,6 +218,27 @@ func (m *RegistryManager) Delete(ctx context.Context, ref ImageReference) error 
 	logging.Info("Successfully deleted image",
 		"image", formatDockerRef(ref))
 	return nil
+}
+
+func (m *RegistryManager) cleanupLoop() {
+	ticker := time.NewTicker(m.cleanupInterval)
+	defer ticker.Stop()
+
+	for {
+		select {
+		case <-ticker.C:
+			if err := m.store.CleanExpiredImages(); err != nil {
+				logging.Error("Failed to clean expired images", "error", err)
+			}
+		case <-m.stopCleanup:
+			return
+		}
+	}
+}
+
+// Stop cleans up resources and stops the cleanup goroutine
+func (m *RegistryManager) Stop() {
+	close(m.stopCleanup)
 }
 
 func formatDockerRef(ref ImageReference) string {

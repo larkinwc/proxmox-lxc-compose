@@ -50,6 +50,10 @@ The main purpose of the CLI is to read a lxc-compose.yml file and use it to crea
   - Pull OCI images from registry
   - Export images as tarballs
   - Convert to LXC templates using docker2lxc
+  - Local image caching with TTL
+  - Automatic cache cleanup
+  - Push/pull from OCI registries
+  - Local image storage and retrieval
 - Testing
   - Unit tests for state management
   - Unit tests for configuration parsing
@@ -132,6 +136,16 @@ Configuration can be provided via:
 - `--debug`: Enable debug logging
 - `--dev`: Enable development mode
 
+### Image Cache Configuration
+The tool includes an intelligent caching system for OCI images:
+
+- Default cache location: ~/.lxc-compose/images
+- Default TTL: 24 hours
+- Automatic cleanup of expired images
+- Cache can be configured via:
+  - `LXC_COMPOSE_CACHE_TTL`: Cache TTL in seconds (default: 86400)
+  - `LXC_COMPOSE_CACHE_DIR`: Custom cache directory path
+
 ## Usage
 
 ```bash
@@ -169,6 +183,13 @@ version: "1.0"
 services:
   web:
     image: ubuntu:20.04
+    security:
+      isolation: strict
+      apparmor_profile: lxc-container-default-restricted
+      capabilities:
+        - NET_ADMIN
+        - SYS_TIME
+      selinux_context: system_u:system_r:container_t:s0
     cpu:
       cores: 2
       shares: 1024
@@ -188,7 +209,42 @@ services:
       DB_HOST: db
       DB_PORT: 5432
     command: ["nginx", "-g", "daemon off;"]
+  
+  privileged-service:
+    image: ubuntu:20.04
+    security:
+      isolation: privileged
+      privileged: true
 ```
+
+### Security Configuration
+
+The tool supports comprehensive security configuration for containers:
+
+- **Isolation Levels**:
+  - `default`: System default security settings
+  - `strict`: Enhanced security with restricted capabilities
+  - `privileged`: Full system access (use with caution)
+
+- **AppArmor Profiles**: Specify custom AppArmor profiles
+  ```yaml
+  security:
+    apparmor_profile: lxc-container-default-restricted
+  ```
+
+- **SELinux Contexts**: Configure SELinux security contexts
+  ```yaml
+  security:
+    selinux_context: system_u:system_r:container_t:s0
+  ```
+
+- **Linux Capabilities**: Fine-grained capability control
+  ```yaml
+  security:
+    capabilities:
+      - NET_ADMIN
+      - SYS_TIME
+  ```
 
 ## Development
 

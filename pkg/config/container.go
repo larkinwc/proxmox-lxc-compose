@@ -48,5 +48,84 @@ func validateContainerConfig(container *Container) error {
 		}
 	}
 
+	// Validate security configuration
+	if container.Security != nil {
+		if err := validateSecurityConfig(container.Security); err != nil {
+			return fmt.Errorf("invalid security configuration: %w", err)
+		}
+	}
+
 	return nil
+}
+
+// validateSecurityConfig validates security configuration
+func validateSecurityConfig(cfg *SecurityConfig) error {
+	// Validate isolation level
+	if cfg.Isolation != "" {
+		switch cfg.Isolation {
+		case "default", "strict", "privileged":
+			// Valid values
+		default:
+			return fmt.Errorf("invalid isolation level: %s", cfg.Isolation)
+		}
+	}
+
+	// Privileged mode and strict isolation are mutually exclusive
+	if cfg.Privileged && cfg.Isolation == "strict" {
+		return fmt.Errorf("cannot use privileged mode with strict isolation")
+	}
+
+	// Validate capabilities
+	for _, cap := range cfg.Capabilities {
+		if !isValidCapability(cap) {
+			return fmt.Errorf("invalid capability: %s", cap)
+		}
+	}
+
+	return nil
+}
+
+// isValidCapability checks if a Linux capability is valid
+func isValidCapability(cap string) bool {
+	validCaps := map[string]bool{
+		"CHOWN":            true,
+		"DAC_OVERRIDE":     true,
+		"DAC_READ_SEARCH":  true,
+		"FOWNER":           true,
+		"FSETID":           true,
+		"KILL":             true,
+		"SETGID":           true,
+		"SETUID":           true,
+		"SETPCAP":          true,
+		"LINUX_IMMUTABLE":  true,
+		"NET_BIND_SERVICE": true,
+		"NET_BROADCAST":    true,
+		"NET_ADMIN":        true,
+		"NET_RAW":          true,
+		"IPC_LOCK":         true,
+		"IPC_OWNER":        true,
+		"SYS_MODULE":       true,
+		"SYS_RAWIO":        true,
+		"SYS_CHROOT":       true,
+		"SYS_PTRACE":       true,
+		"SYS_PACCT":        true,
+		"SYS_ADMIN":        true,
+		"SYS_BOOT":         true,
+		"SYS_NICE":         true,
+		"SYS_RESOURCE":     true,
+		"SYS_TIME":         true,
+		"SYS_TTY_CONFIG":   true,
+		"MKNOD":            true,
+		"LEASE":            true,
+		"AUDIT_WRITE":      true,
+		"AUDIT_CONTROL":    true,
+		"SETFCAP":          true,
+		"MAC_OVERRIDE":     true,
+		"MAC_ADMIN":        true,
+		"SYSLOG":           true,
+		"WAKE_ALARM":       true,
+		"BLOCK_SUSPEND":    true,
+		"AUDIT_READ":       true,
+	}
+	return validCaps[cap]
 }

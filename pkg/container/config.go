@@ -29,6 +29,11 @@ func (m *LXCManager) applyConfig(name string, cfg *config.Container) error {
 		return err
 	}
 
+	// Apply security configuration
+	if err := m.applySecurityConfig(f, cfg.Security); err != nil {
+		return err
+	}
+
 	// Apply resource limits
 	if err := m.applyCPUConfig(f, cfg.CPU); err != nil {
 		return err
@@ -244,6 +249,58 @@ exec %s
 	// Set the init script as the container's init command
 	if err := writeConfig(f, "lxc.init.cmd", initScript); err != nil {
 		return fmt.Errorf("failed to set init command: %w", err)
+	}
+
+	return nil
+}
+
+func (m *LXCManager) applySecurityConfig(f *os.File, cfg *config.SecurityConfig) error {
+	if cfg == nil {
+		// Apply default security settings
+		return writeConfig(f, "lxc.apparmor.profile", "lxc-container-default")
+	}
+
+	// Write isolation level
+	if cfg.Isolation != "" {
+		if err := writeConfig(f, "lxc.include", fmt.Sprintf("/usr/share/lxc/config/%s.conf", cfg.Isolation)); err != nil {
+			return err
+		}
+	}
+
+	// Write security configurations
+	if cfg.Privileged {
+		if err := writeConfig(f, "lxc.apparmor.profile", "unconfined"); err != nil {
+			return err
+		}
+		if err := writeConfig(f, "lxc.cap.drop", ""); err != nil {
+			return err
+		}
+	} else {
+		if cfg.AppArmorProfile != "" {
+			if err := writeConfig(f, "lxc.apparmor.profile", cfg.AppArmorProfile); err != nil {
+				return err
+			}
+		}
+		if cfg.SELinuxContext != "" {
+			if err := writeConfig(f, "lxc.selinux.context", cfg.SELinuxContext); err != nil {
+				return err
+			}
+		}
+		if len(cfg.Capabilities) > 0 {
+			if err := writeConfig(f, "lxc.cap.drop", "all"); err != nil {
+				return err
+			}
+			if err := writeConfig(f, "lxc.cap.keep", strings.Join(cfg.Capabilities, " ")); err != nil {
+				return err
+			}
+		}
+	}
+
+	// Apply seccomp profile if specified
+	if cfg.SeccompProfile != "" {
+		if err := writeConfig(f, "lxc.seccomp.profile", cfg.SeccompProfile); err != nil {
+			return err
+		}
 	}
 
 	return nil

@@ -20,6 +20,7 @@ type Container struct {
 	Command     []string          `yaml:"command,omitempty" json:"command,omitempty"`
 	Entrypoint  []string          `yaml:"entrypoint,omitempty" json:"entrypoint,omitempty"`
 	Devices     []DeviceConfig    `yaml:"devices,omitempty" json:"devices,omitempty"`
+	Security    *SecurityConfig   `yaml:"security,omitempty" json:"security,omitempty"`
 }
 
 // CPUConfig represents CPU resource limits
@@ -76,6 +77,16 @@ type DeviceConfig struct {
 	Source      string   `yaml:"source,omitempty" json:"source"`
 	Destination string   `yaml:"destination,omitempty" json:"target"`
 	Options     []string `yaml:"options,omitempty" json:"options,omitempty"`
+}
+
+// SecurityConfig represents container security settings
+type SecurityConfig struct {
+	Isolation       string   `yaml:"isolation,omitempty" json:"isolation,omitempty"`
+	Privileged      bool     `yaml:"privileged,omitempty" json:"privileged,omitempty"`
+	AppArmorProfile string   `yaml:"apparmor_profile,omitempty" json:"apparmor_profile,omitempty"`
+	SELinuxContext  string   `yaml:"selinux_context,omitempty" json:"selinux_context,omitempty"`
+	Capabilities    []string `yaml:"capabilities,omitempty" json:"capabilities,omitempty"`
+	SeccompProfile  string   `yaml:"seccomp_profile,omitempty" json:"seccomp_profile,omitempty"`
 }
 
 // DefaultStorageConfig returns default storage configuration
