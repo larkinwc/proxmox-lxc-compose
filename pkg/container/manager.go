@@ -3,7 +3,6 @@ package container
 import (
 	"fmt"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"strings"
 	"time"
@@ -94,9 +93,8 @@ func (m *LXCManager) ContainerExists(name string) bool {
 		return true
 	}
 
-	// Finally, check if the container exists in LXC
-	cmd := exec.Command("lxc-info", "-n", name)
-	if err := cmd.Run(); err == nil {
+	// Check if the container exists in LXC
+	if err := m.execLXCCommand("lxc-info", "-n", name); err == nil {
 		return true
 	}
 
@@ -139,18 +137,7 @@ func (m *LXCManager) Start(name string) error {
 	}
 
 	// Start the container
-	cmd := exec.Command("lxc-start", "-n", name)
-	if err := cmd.Run(); err != nil {
-		if exitErr, ok := err.(*exec.ExitError); ok {
-			switch exitErr.ExitCode() {
-			case 1:
-				return fmt.Errorf("container '%s' is not in a valid state for starting", name)
-			case 2:
-				return fmt.Errorf("container '%s' does not exist", name)
-			default:
-				return fmt.Errorf("failed to start container: %w", err)
-			}
-		}
+	if err := m.execLXCCommand("lxc-start", "-n", name); err != nil {
 		return fmt.Errorf("failed to start container: %w", err)
 	}
 
@@ -159,7 +146,6 @@ func (m *LXCManager) Start(name string) error {
 		return fmt.Errorf("failed to update container state: %w", err)
 	}
 
-	fmt.Printf("DEBUG: Container '%s' started successfully\n", name)
 	return nil
 }
 
@@ -178,19 +164,8 @@ func (m *LXCManager) Stop(name string) error {
 		return fmt.Errorf("container '%s' is not in a valid state for stopping (current state: %s)", name, container.State)
 	}
 
-	// Stop the container
-	cmd := exec.Command("lxc-stop", "-n", name)
-	if err := cmd.Run(); err != nil {
-		if exitErr, ok := err.(*exec.ExitError); ok {
-			switch exitErr.ExitCode() {
-			case 1:
-				return fmt.Errorf("container '%s' is not in a valid state for stopping", name)
-			case 2:
-				return fmt.Errorf("container '%s' does not exist", name)
-			default:
-				return fmt.Errorf("failed to stop container: %w", err)
-			}
-		}
+	// Stop the container using execLXCCommand
+	if err := m.execLXCCommand("lxc-stop", "-n", name); err != nil {
 		return fmt.Errorf("failed to stop container: %w", err)
 	}
 
@@ -199,7 +174,6 @@ func (m *LXCManager) Stop(name string) error {
 		return fmt.Errorf("failed to update container state: %w", err)
 	}
 
-	fmt.Printf("DEBUG: Container '%s' stopped successfully\n", name)
 	return nil
 }
 
