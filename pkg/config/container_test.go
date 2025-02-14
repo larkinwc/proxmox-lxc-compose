@@ -1,24 +1,24 @@
-package config
+package config_test
 
 import (
+	"proxmox-lxc-compose/pkg/config"
+	testing_internal "proxmox-lxc-compose/pkg/internal/testing"
 	"strings"
 	"testing"
-
-	. "proxmox-lxc-compose/pkg/internal/testing"
 )
 
 func TestDefaultStorageConfig(t *testing.T) {
 	tests := []struct {
 		name     string
-		input    *Container
-		expected *StorageConfig
+		input    *config.Container
+		expected *config.StorageConfig
 	}{
 		{
 			name: "default config with no size",
-			input: &Container{
+			input: &config.Container{
 				Image: "ubuntu:20.04",
 			},
-			expected: &StorageConfig{
+			expected: &config.StorageConfig{
 				Root:      "10G",
 				Backend:   "dir",
 				AutoMount: true,
@@ -26,11 +26,11 @@ func TestDefaultStorageConfig(t *testing.T) {
 		},
 		{
 			name: "custom size specified",
-			input: &Container{
+			input: &config.Container{
 				Image: "ubuntu:20.04",
 				Size:  "50GB",
 			},
-			expected: &StorageConfig{
+			expected: &config.StorageConfig{
 				Root:      "50GB",
 				Backend:   "dir",
 				AutoMount: true,
@@ -38,15 +38,15 @@ func TestDefaultStorageConfig(t *testing.T) {
 		},
 		{
 			name: "existing storage config",
-			input: &Container{
+			input: &config.Container{
 				Image: "ubuntu:20.04",
-				Storage: &StorageConfig{
+				Storage: &config.StorageConfig{
 					Root:    "20G",
 					Backend: "zfs",
 					Pool:    "lxc",
 				},
 			},
-			expected: &StorageConfig{
+			expected: &config.StorageConfig{
 				Root:    "20G",
 				Backend: "zfs",
 				Pool:    "lxc",
@@ -57,10 +57,10 @@ func TestDefaultStorageConfig(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			result := tt.input.DefaultStorageConfig()
-			AssertEqual(t, tt.expected.Root, result.Root)
-			AssertEqual(t, tt.expected.Backend, result.Backend)
-			AssertEqual(t, tt.expected.AutoMount, result.AutoMount)
-			AssertEqual(t, tt.expected.Pool, result.Pool)
+			testing_internal.AssertEqual(t, tt.expected.Root, result.Root)
+			testing_internal.AssertEqual(t, tt.expected.Backend, result.Backend)
+			testing_internal.AssertEqual(t, tt.expected.AutoMount, result.AutoMount)
+			testing_internal.AssertEqual(t, tt.expected.Pool, result.Pool)
 		})
 	}
 }
@@ -68,20 +68,20 @@ func TestDefaultStorageConfig(t *testing.T) {
 func TestSecurityConfig(t *testing.T) {
 	tests := []struct {
 		name        string
-		config      *SecurityConfig
+		config      *config.SecurityConfig
 		wantErr     bool
 		errContains string
 	}{
 		{
 			name: "valid default config",
-			config: &SecurityConfig{
+			config: &config.SecurityConfig{
 				Isolation: "default",
 			},
 			wantErr: false,
 		},
 		{
 			name: "valid strict config",
-			config: &SecurityConfig{
+			config: &config.SecurityConfig{
 				Isolation:       "strict",
 				AppArmorProfile: "lxc-container-default",
 				Capabilities:    []string{"NET_ADMIN", "SYS_TIME"},
@@ -90,7 +90,7 @@ func TestSecurityConfig(t *testing.T) {
 		},
 		{
 			name: "privileged config",
-			config: &SecurityConfig{
+			config: &config.SecurityConfig{
 				Isolation:  "privileged",
 				Privileged: true,
 			},
@@ -98,7 +98,7 @@ func TestSecurityConfig(t *testing.T) {
 		},
 		{
 			name: "invalid isolation",
-			config: &SecurityConfig{
+			config: &config.SecurityConfig{
 				Isolation: "invalid",
 			},
 			wantErr:     true,
@@ -106,7 +106,7 @@ func TestSecurityConfig(t *testing.T) {
 		},
 		{
 			name: "invalid privileged strict combination",
-			config: &SecurityConfig{
+			config: &config.SecurityConfig{
 				Isolation:  "strict",
 				Privileged: true,
 			},
@@ -115,7 +115,7 @@ func TestSecurityConfig(t *testing.T) {
 		},
 		{
 			name: "invalid capability",
-			config: &SecurityConfig{
+			config: &config.SecurityConfig{
 				Isolation:    "default",
 				Capabilities: []string{"INVALID_CAP"},
 			},
@@ -126,13 +126,85 @@ func TestSecurityConfig(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			err := validateSecurityConfig(tt.config)
+			container := &config.Container{
+				Security: tt.config,
+			}
+			err := config.Validate(container)
 			if (err != nil) != tt.wantErr {
-				t.Errorf("validateSecurityConfig() error = %v, wantErr %v", err, tt.wantErr)
+				t.Errorf("Security validation error = %v, wantErr %v", err, tt.wantErr)
 				return
 			}
 			if tt.wantErr && !strings.Contains(err.Error(), tt.errContains) {
-				t.Errorf("validateSecurityConfig() error = %v, want error containing %v", err, tt.errContains)
+				t.Errorf("Security validation error = %v, want error containing %v", err, tt.errContains)
+			}
+		})
+	}
+}
+
+func TestContainerConfig(t *testing.T) {
+	tests := []struct {
+		name    string
+		config  *config.Container
+		wantErr bool
+	}{
+		{
+			name: "valid config",
+			config: &config.Container{
+				Storage: &config.StorageConfig{
+					Root: "10G",
+				},
+				Security: &config.SecurityConfig{
+					Isolation: "strict",
+				},
+			},
+			wantErr: false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			err := config.Validate(tt.config)
+			if tt.wantErr {
+				testing_internal.AssertError(t, err)
+			} else {
+				testing_internal.AssertNoError(t, err)
+			}
+		})
+	}
+}
+
+func TestContainerValidation(t *testing.T) {
+	tests := []struct {
+		name    string
+		config  *config.SecurityConfig
+		wantErr bool
+	}{
+		{
+			name: "valid config",
+			config: &config.SecurityConfig{
+				Isolation: "strict",
+			},
+			wantErr: false,
+		},
+		{
+			name: "invalid isolation",
+			config: &config.SecurityConfig{
+				Isolation: "invalid",
+			},
+			wantErr: true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			container := &config.Container{
+				Security: tt.config,
+			}
+			err := config.Validate(container)
+			if tt.wantErr {
+				testing_internal.AssertError(t, err)
+			} else {
+				testing_internal.AssertNoError(t, err)
 			}
 		})
 	}

@@ -7,14 +7,13 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
-	"proxmox-lxc-compose/pkg/config"
 	"strings"
 	"sync"
 	"time"
 )
 
-// MockCommandState tracks the state of mock commands
-type MockCommandState struct {
+// CommandState tracks the state of mock commands
+type CommandState struct {
 	mu             sync.RWMutex
 	Name           string
 	Args           []string
@@ -26,15 +25,22 @@ type MockCommandState struct {
 	}
 }
 
+type containerState struct {
+	Name          string     `json:"name"`
+	CreatedAt     time.Time  `json:"created_at"`
+	LastStartedAt *time.Time `json:"last_started_at,omitempty"`
+	Status        string     `json:"status"`
+}
+
 // SetDebug enables or disables debug logging
-func (m *MockCommandState) SetDebug(enabled bool) {
+func (m *CommandState) SetDebug(enabled bool) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	m.debug = enabled
 }
 
 // getStateFromFile reads the container state from its state file
-func (m *MockCommandState) getStateFromFile(containerName string) (string, error) {
+func (m *CommandState) getStateFromFile(containerName string) (string, error) {
 	if configPath, ok := os.LookupEnv("CONTAINER_CONFIG_PATH"); ok {
 		stateFilePath := filepath.Join(configPath, "state", containerName+".json")
 		data, err := os.ReadFile(stateFilePath)
@@ -55,7 +61,7 @@ func (m *MockCommandState) getStateFromFile(containerName string) (string, error
 }
 
 // SetContainerState allows tests to set the state of a container
-func (m *MockCommandState) SetContainerState(containerName, state string) error {
+func (m *CommandState) SetContainerState(containerName, state string) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	state = strings.ToUpper(state)
@@ -69,16 +75,9 @@ func (m *MockCommandState) SetContainerState(containerName, state string) error 
 
 		// Create state file
 		stateFilePath := filepath.Join(statePath, containerName+".json")
-		stateData := struct {
-			Name          string            `json:"name"`
-			CreatedAt     time.Time         `json:"created_at"`
-			LastStartedAt *time.Time        `json:"last_started_at,omitempty"`
-			Config        *config.Container `json:"config"`
-			Status        string            `json:"status"`
-		}{
+		stateData := containerState{
 			Name:      containerName,
 			CreatedAt: time.Now(),
-			Config:    &config.Container{},
 			Status:    state,
 		}
 
@@ -95,7 +94,7 @@ func (m *MockCommandState) SetContainerState(containerName, state string) error 
 }
 
 // AddContainer adds a container to the mock state and ensures its state file exists
-func (m *MockCommandState) AddContainer(containerName, state string) error {
+func (m *CommandState) AddContainer(containerName, state string) error {
 	if m.debug {
 		fmt.Printf("DEBUG: Adding container %s with state %s\n", containerName, state)
 	}
@@ -119,7 +118,7 @@ func (m *MockCommandState) AddContainer(containerName, state string) error {
 }
 
 // ContainerExists checks if a container exists
-func (m *MockCommandState) ContainerExists(containerName string) bool {
+func (m *CommandState) ContainerExists(containerName string) bool {
 	if m.debug {
 		fmt.Printf("DEBUG: ContainerExists check for %s\n", containerName)
 	}
@@ -154,7 +153,7 @@ func (m *MockCommandState) ContainerExists(containerName string) bool {
 }
 
 // GetContainerState returns the current state of a container
-func (m *MockCommandState) GetContainerState(containerName string) string {
+func (m *CommandState) GetContainerState(containerName string) string {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
 
@@ -165,7 +164,7 @@ func (m *MockCommandState) GetContainerState(containerName string) string {
 	return state
 }
 
-func (m *MockCommandState) execLXCCommand(containerName string, command string, args ...string) error {
+func (m *CommandState) execLXCCommand(containerName string, command string, _ ...string) error {
 	if m.debug {
 		fmt.Printf("DEBUG: Executing command %s for container %s\n", command, containerName)
 	}
@@ -249,8 +248,8 @@ func (m *MockCommandState) execLXCCommand(containerName string, command string, 
 }
 
 // SetupMockCommand sets up command mocking and returns a cleanup function
-func SetupMockCommand(execCommand *func(string, ...string) *exec.Cmd) (*MockCommandState, func()) {
-	mock := &MockCommandState{
+func SetupMockCommand(execCommand *func(string, ...string) *exec.Cmd) (*CommandState, func()) {
+	mock := &CommandState{
 		tmpFiles: make([]string, 0),
 		debug:    true,
 		commandHistory: make([]struct {

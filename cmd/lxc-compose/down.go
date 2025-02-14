@@ -20,9 +20,16 @@ If service names are provided, only those services will be stopped.
 Use --rm to also remove the containers.`,
 		RunE: func(_ *cobra.Command, args []string) error {
 			// Load configuration
-			cfg, err := config.LoadConfig(configFile)
+			cfg, err := config.Load(configFile)
 			if err != nil {
 				return fmt.Errorf("failed to load config: %w", err)
+			}
+
+			// Convert to compose config type
+			var compose config.ComposeConfig
+			compose.Services = make(map[string]config.Container)
+			if cfg != nil {
+				compose.Services["default"] = *cfg
 			}
 
 			// Create container manager
@@ -34,13 +41,13 @@ Use --rm to also remove the containers.`,
 			// Stop all or specified services
 			services := args
 			if len(services) == 0 {
-				for name := range cfg.Services {
+				for name := range compose.Services {
 					services = append(services, name)
 				}
 			}
 
 			for _, name := range services {
-				if _, ok := cfg.Services[name]; !ok {
+				if _, ok := compose.Services[name]; !ok {
 					return fmt.Errorf("service '%s' not found in config", name)
 				}
 

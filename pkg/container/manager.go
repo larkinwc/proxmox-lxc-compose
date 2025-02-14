@@ -1,6 +1,7 @@
 package container
 
 import (
+	"context"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -8,6 +9,8 @@ import (
 	"time"
 
 	"proxmox-lxc-compose/pkg/config"
+	"proxmox-lxc-compose/pkg/internal/recovery"
+	"proxmox-lxc-compose/pkg/logging"
 )
 
 // Manager defines the interface for managing LXC containers
@@ -42,9 +45,7 @@ type LXCManager struct {
 
 // NewLXCManager creates a new LXC container manager
 func NewLXCManager(configPath string) (*LXCManager, error) {
-	if err := os.MkdirAll(configPath, 0755); err != nil {
-		return nil, fmt.Errorf("failed to create config directory: %w", err)
-	}
+	logging.Debug("Initializing LXC manager", "configPath", configPath)
 
 	stateManager, err := NewStateManager(filepath.Join(configPath, "state"))
 	if err != nil {
@@ -58,46 +59,52 @@ func NewLXCManager(configPath string) (*LXCManager, error) {
 }
 
 func (m *LXCManager) execLXCCommand(name string, args ...string) error {
-	cmd := execCommand(name, args...)
-	output, err := cmd.CombinedOutput()
-	if err != nil {
-		outputStr := strings.TrimSpace(string(output))
-		if len(outputStr) > 0 {
-			// Parse common LXC error messages
-			if strings.Contains(outputStr, "not found") {
-				return fmt.Errorf("container not found")
-			}
-			if strings.Contains(outputStr, "already running") {
-				return fmt.Errorf("container is already running")
-			}
-			if strings.Contains(outputStr, "not running") {
-				return fmt.Errorf("container is not running")
-			}
-			return fmt.Errorf("%s", outputStr)
+	logging.Debug("Executing LXC command",
+		"command", name,
+		"args", args,
+		"container", args[1], // args[1] is usually the container name
+	)
+	// Use retry with backoff for commands that might fail temporarily
+	ctx := context.Background()
+	return recovery.RetryWithBackoff(ctx, recovery.DefaultRetryConfig, func() error {
+		cmd := execCommand(name, args...)
+		if output, err := cmd.CombinedOutput(); err != nil {
+			logging.Error("Command failed",
+				"command", name,
+				"args", args,
+				"output", string(output),
+				"error", err,
+			)
+			return fmt.Errorf("command failed: %w", err)
 		}
-		return err
-	}
-	return nil
+		return nil
+	})
 }
 
 // ContainerExists checks if a container exists
 func (m *LXCManager) ContainerExists(name string) bool {
+	logging.Debug("Checking if container exists", "name", name)
+
 	// Check if the container exists in our state
 	if _, err := m.state.GetContainerState(name); err == nil {
+		logging.Debug("Container found in state", "name", name)
 		return true
 	}
 
 	// Check if the container directory exists
 	containerPath := filepath.Join(m.configPath, name)
 	if _, err := os.Stat(containerPath); err == nil {
+		logging.Debug("Container directory exists", "name", name, "path", containerPath)
 		return true
 	}
 
 	// Check if the container exists in LXC
 	if err := m.execLXCCommand("lxc-info", "-n", name); err == nil {
+		logging.Debug("Container found in LXC", "name", name)
 		return true
 	}
 
+	logging.Debug("Container does not exist", "name", name)
 	return false
 }
 

@@ -1,6 +1,7 @@
 package container
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"os"
@@ -10,6 +11,8 @@ import (
 	"time"
 
 	"proxmox-lxc-compose/pkg/config"
+	"proxmox-lxc-compose/pkg/internal/recovery"
+	"proxmox-lxc-compose/pkg/logging"
 )
 
 // State represents the persistent state of a container
@@ -31,6 +34,8 @@ type StateManager struct {
 
 // NewStateManager creates a new state manager
 func NewStateManager(statePath string) (*StateManager, error) {
+	logging.Debug("Initializing state manager", "path", statePath)
+
 	if err := os.MkdirAll(statePath, 0755); err != nil {
 		return nil, fmt.Errorf("failed to create state directory: %w", err)
 	}
@@ -47,45 +52,63 @@ func NewStateManager(statePath string) (*StateManager, error) {
 	return sm, nil
 }
 
-// SaveContainerState saves the state of a container
+// SaveContainerState saves the state of a container with retries
 func (sm *StateManager) SaveContainerState(name string, cfg *config.Container, status string) error {
-	sm.mu.Lock()
-	defer sm.mu.Unlock()
+	logging.Debug("Saving container state",
+		"name", name,
+		"status", status,
+		"config", fmt.Sprintf("%+v", cfg),
+	)
 
-	state := &State{
-		Name:      name,
-		Config:    cfg,
-		Status:    status,
-		CreatedAt: time.Now(),
-	}
+	ctx := context.Background()
+	return recovery.RetryWithBackoff(ctx, recovery.DefaultRetryConfig, func() error {
+		sm.mu.Lock()
+		defer sm.mu.Unlock()
 
-	if existing, ok := sm.states[name]; ok {
-		state.CreatedAt = existing.CreatedAt
-		if status == "RUNNING" && (existing.Status == "STOPPED" || existing.Status == "FROZEN") {
-			state.LastStartedAt = &time.Time{}
-			*state.LastStartedAt = time.Now()
-		} else if status == "STOPPED" && existing.Status == "RUNNING" {
-			state.LastStoppedAt = &time.Time{}
-			*state.LastStoppedAt = time.Now()
+		state := &State{
+			Name:      name,
+			Config:    cfg,
+			Status:    status,
+			CreatedAt: time.Now(),
 		}
-	}
 
-	sm.states[name] = state
+		if existing, ok := sm.states[name]; ok {
+			state.CreatedAt = existing.CreatedAt
+			if status == "RUNNING" && (existing.Status == "STOPPED" || existing.Status == "FROZEN") {
+				now := time.Now()
+				state.LastStartedAt = &now
+				logging.Debug("Container started", "name", name, "time", now)
+			} else if status == "STOPPED" && existing.Status == "RUNNING" {
+				now := time.Now()
+				state.LastStoppedAt = &now
+				logging.Debug("Container stopped", "name", name, "time", now)
+			}
+		}
 
-	if err := sm.saveState(name, state); err != nil {
-		return fmt.Errorf("failed to save state: %w", err)
-	}
+		sm.states[name] = state
 
-	return nil
+		if err := sm.saveState(name, state); err != nil {
+			logging.Error("Failed to save state",
+				"name", name,
+				"error", err,
+			)
+			return fmt.Errorf("failed to save state: %w", err)
+		}
+
+		return nil
+	})
 }
 
 // GetContainerState retrieves the state of a container
 func (sm *StateManager) GetContainerState(name string) (*State, error) {
+	logging.Debug("Getting container state", "name", name)
+
 	sm.mu.RLock()
 	defer sm.mu.RUnlock()
 
 	state, ok := sm.states[name]
 	if !ok {
+		logging.Debug("Container state not found", "name", name)
 		return nil, fmt.Errorf("container %s does not exist", name)
 	}
 
@@ -170,4 +193,46 @@ func (sm *StateManager) saveState(name string, state *State) error {
 // getStatePath returns the path to a container's state file
 func (sm *StateManager) getStatePath(name string) string {
 	return filepath.Join(sm.statePath, name+".json")
+}
+
+// GetStatePath returns the path to the state directory
+func (sm *StateManager) GetStatePath() string {
+	return sm.statePath
+}
+
+// GetStates returns all container states
+func (sm *StateManager) GetStates() map[string]*State {
+	sm.mu.RLock()
+	defer sm.mu.RUnlock()
+	states := make(map[string]*State)
+	for k, v := range sm.states {
+		states[k] = v
+	}
+	return states
+}
+
+// LoadStateFromDisk loads a container state from disk
+func (sm *StateManager) LoadStateFromDisk(name string) (*State, error) {
+	return sm.loadState(name)
+}
+
+func (sm *StateManager) GetState(name string) (*State, error) {
+	sm.mu.RLock()
+	defer sm.mu.RUnlock()
+
+	state, ok := sm.states[name]
+	if !ok {
+		return nil, fmt.Errorf("state not found for container: %s", name)
+	}
+	return state, nil
+}
+
+func (sm *StateManager) SaveState(state *State) error {
+	if state == nil || state.Name == "" {
+		return fmt.Errorf("invalid state: name is required")
+	}
+	sm.mu.Lock()
+	defer sm.mu.Unlock()
+	sm.states[state.Name] = state
+	return sm.saveState(state.Name, state)
 }

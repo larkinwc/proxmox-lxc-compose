@@ -1,10 +1,11 @@
-package container
+package container_test
 
 import (
 	"bytes"
 	"fmt"
 	"io"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"sync"
@@ -12,19 +13,25 @@ import (
 	"time"
 
 	"proxmox-lxc-compose/pkg/config"
+	"proxmox-lxc-compose/pkg/container"
 	"proxmox-lxc-compose/pkg/internal/mock"
-	. "proxmox-lxc-compose/pkg/internal/testing"
+	testing_internal "proxmox-lxc-compose/pkg/internal/testing"
 )
 
+// Mock exec.Command for testing
+var execCommand = func(name string, args ...string) *exec.Cmd {
+	return exec.Command(name, args...)
+}
+
 func TestGetLogs(t *testing.T) {
-	dir, dirCleanup := TempDir(t)
+	dir, dirCleanup := testing_internal.TempDir(t)
 	defer dirCleanup()
 
 	// Create test container directory and log file
 	containerName := "test-container"
 	containerDir := filepath.Join(dir, containerName)
 	err := os.MkdirAll(containerDir, 0755)
-	AssertNoError(t, err)
+	testing_internal.AssertNoError(t, err)
 
 	// Create test log file with timestamps
 	logContent := []string{
@@ -37,18 +44,11 @@ func TestGetLogs(t *testing.T) {
 		[]byte(strings.Join(logContent, "\n")),
 		0644,
 	)
-	AssertNoError(t, err)
-
-	// Create state manager
-	statePath := filepath.Join(dir, "state")
-	stateManager, err := NewStateManager(statePath)
-	AssertNoError(t, err)
+	testing_internal.AssertNoError(t, err)
 
 	// Create manager
-	manager := &LXCManager{
-		configPath: dir,
-		state:      stateManager,
-	}
+	manager, err := container.NewLXCManager(dir)
+	testing_internal.AssertNoError(t, err)
 
 	// Setup mock command
 	oldExecCommand := execCommand
@@ -58,87 +58,78 @@ func TestGetLogs(t *testing.T) {
 
 	// Ensure container exists and is running
 	mock.AddContainer(containerName, "RUNNING")
-	err = stateManager.SaveContainerState(containerName, &config.Container{}, "RUNNING")
-	AssertNoError(t, err)
+
+	// Create container with initial state
+	err = manager.Create(containerName, &config.Container{})
+	testing_internal.AssertNoError(t, err)
 
 	t.Run("reads all logs", func(t *testing.T) {
-		logs, err := manager.GetLogs(containerName, LogOptions{})
-		AssertNoError(t, err)
+		logs, err := manager.GetLogs(containerName, container.LogOptions{})
+		testing_internal.AssertNoError(t, err)
 		defer logs.Close()
 
 		content, err := io.ReadAll(logs)
-		AssertNoError(t, err)
+		testing_internal.AssertNoError(t, err)
 
 		expected := strings.TrimSpace(strings.Join(logContent, "\n"))
 		actual := strings.TrimSpace(string(content))
-		AssertEqual(t, expected, actual)
+		testing_internal.AssertEqual(t, expected, actual)
 	})
 
 	t.Run("respects tail option", func(t *testing.T) {
-		logs, err := manager.GetLogs(containerName, LogOptions{Tail: 2})
-		AssertNoError(t, err)
+		logs, err := manager.GetLogs(containerName, container.LogOptions{Tail: 2})
+		testing_internal.AssertNoError(t, err)
 		defer logs.Close()
 
 		content, err := io.ReadAll(logs)
-		AssertNoError(t, err)
+		testing_internal.AssertNoError(t, err)
 
 		// Should only contain the last 2 lines
 		expected := strings.TrimSpace(strings.Join(logContent[len(logContent)-2:], "\n"))
 		actual := strings.TrimSpace(string(content))
-		AssertEqual(t, expected, actual)
+		testing_internal.AssertEqual(t, expected, actual)
 	})
 
 	t.Run("respects since option", func(t *testing.T) {
-		logs, err := manager.GetLogs(containerName, LogOptions{
+		logs, err := manager.GetLogs(containerName, container.LogOptions{
 			Since: time.Now().Add(-30 * time.Minute),
 		})
-		AssertNoError(t, err)
+		testing_internal.AssertNoError(t, err)
 		defer logs.Close()
 
 		content, err := io.ReadAll(logs)
-		AssertNoError(t, err)
+		testing_internal.AssertNoError(t, err)
 
 		// Should only contain the last line
 		expected := strings.TrimSpace(logContent[2])
 		actual := strings.TrimSpace(string(content))
-		AssertEqual(t, expected, actual)
+		testing_internal.AssertEqual(t, expected, actual)
 	})
 
 	t.Run("handles non-existent container", func(t *testing.T) {
-		_, err := manager.GetLogs("nonexistent", LogOptions{})
-		AssertError(t, err)
+		_, err := manager.GetLogs("nonexistent", container.LogOptions{})
+		testing_internal.AssertError(t, err)
 	})
 }
 
 func TestFollowLogs(t *testing.T) {
-	dir, dirCleanup := TempDir(t)
+	dir, dirCleanup := testing_internal.TempDir(t)
 	defer dirCleanup()
 
 	// Create test container directory
 	containerName := "test-container"
 	containerDir := filepath.Join(dir, containerName)
 	err := os.MkdirAll(containerDir, 0755)
-	AssertNoError(t, err)
+	testing_internal.AssertNoError(t, err)
 
 	// Create empty log file
 	logPath := filepath.Join(containerDir, "console.log")
 	err = os.WriteFile(logPath, []byte{}, 0644)
-	AssertNoError(t, err)
-
-	// Set config path for mock command
-	os.Setenv("CONTAINER_CONFIG_PATH", dir)
-	defer os.Unsetenv("CONTAINER_CONFIG_PATH")
-
-	// Create state manager
-	statePath := filepath.Join(dir, "state")
-	stateManager, err := NewStateManager(statePath)
-	AssertNoError(t, err)
+	testing_internal.AssertNoError(t, err)
 
 	// Create manager
-	manager := &LXCManager{
-		configPath: dir,
-		state:      stateManager,
-	}
+	manager, err := container.NewLXCManager(dir)
+	testing_internal.AssertNoError(t, err)
 
 	// Setup mock command
 	oldExecCommand := execCommand
@@ -148,8 +139,8 @@ func TestFollowLogs(t *testing.T) {
 
 	// Ensure container exists and is running
 	mock.AddContainer(containerName, "RUNNING")
-	err = stateManager.SaveContainerState(containerName, &config.Container{}, "RUNNING")
-	AssertNoError(t, err)
+	err = manager.Create(containerName, &config.Container{})
+	testing_internal.AssertNoError(t, err)
 
 	t.Run("follows log output", func(t *testing.T) {
 		var buf bytes.Buffer
@@ -158,8 +149,11 @@ func TestFollowLogs(t *testing.T) {
 
 		// Start following logs in background
 		go func() {
-			err := manager.FollowLogs(containerName, &syncWriter{w: &buf, mu: &mu})
-			AssertNoError(t, err)
+			logs, err := manager.GetLogs(containerName, container.LogOptions{Follow: true})
+			testing_internal.AssertNoError(t, err)
+			defer logs.Close()
+			_, err = io.Copy(&syncWriter{w: &buf, mu: &mu}, logs)
+			testing_internal.AssertNoError(t, err)
 			close(done)
 		}()
 
@@ -200,11 +194,11 @@ func TestFollowLogs(t *testing.T) {
 
 		// Start following logs in background with timestamps disabled
 		go func() {
-			logs, err := manager.GetLogs(containerName, LogOptions{Follow: true, Timestamp: false})
-			AssertNoError(t, err)
+			logs, err := manager.GetLogs(containerName, container.LogOptions{Follow: true, Timestamp: false})
+			testing_internal.AssertNoError(t, err)
 			defer logs.Close()
 			_, err = io.Copy(&syncWriter{w: &buf, mu: &mu}, logs)
-			AssertNoError(t, err)
+			testing_internal.AssertNoError(t, err)
 			close(done)
 		}()
 

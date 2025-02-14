@@ -48,6 +48,22 @@ func AssertFileExists(t *testing.T, path string) {
 	}
 }
 
+// AssertFileNotExists asserts that a file does not exist
+func AssertFileNotExists(t *testing.T, path string) {
+	t.Helper()
+	if _, err := os.Stat(path); !os.IsNotExist(err) {
+		t.Errorf("File exists but should not: %s", path)
+	}
+}
+
+// AssertNotNil asserts that a value is not nil
+func AssertNotNil(t *testing.T, value interface{}) {
+	t.Helper()
+	if value == nil {
+		t.Fatal("Expected value to not be nil")
+	}
+}
+
 // TempDir creates a temporary directory and returns a cleanup function
 func TempDir(t *testing.T) (string, func()) {
 	t.Helper()

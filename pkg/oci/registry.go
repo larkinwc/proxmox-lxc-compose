@@ -120,7 +120,7 @@ func (m *RegistryManager) Push(ctx context.Context, ref ImageReference) error {
 	})
 }
 
-func (m *RegistryManager) Save(ctx context.Context, ref ImageReference) error {
+func (m *RegistryManager) Save(_ context.Context, ref ImageReference) error {
 	logging.Info("Saving image",
 		"registry", ref.Registry,
 		"repository", ref.Repository,
@@ -151,7 +151,7 @@ func (m *RegistryManager) Save(ctx context.Context, ref ImageReference) error {
 	return nil
 }
 
-func (m *RegistryManager) Load(ctx context.Context, ref ImageReference) error {
+func (m *RegistryManager) Load(_ context.Context, ref ImageReference) error {
 	logging.Info("Loading image",
 		"registry", ref.Registry,
 		"repository", ref.Repository,
@@ -181,7 +181,7 @@ func (m *RegistryManager) Load(ctx context.Context, ref ImageReference) error {
 	return nil
 }
 
-func (m *RegistryManager) List(ctx context.Context) ([]ImageReference, error) {
+func (m *RegistryManager) List(_ context.Context) ([]ImageReference, error) {
 	logging.Info("Listing images")
 
 	images, err := m.store.List()
@@ -193,7 +193,7 @@ func (m *RegistryManager) List(ctx context.Context) ([]ImageReference, error) {
 	return images, nil
 }
 
-func (m *RegistryManager) Delete(ctx context.Context, ref ImageReference) error {
+func (m *RegistryManager) Delete(_ context.Context, ref ImageReference) error {
 	logging.Info("Deleting image",
 		"registry", ref.Registry,
 		"repository", ref.Repository,

@@ -56,9 +56,37 @@ type MountConfig struct {
 	ReadOnly bool     `yaml:"read_only,omitempty" json:"read_only,omitempty"`
 }
 
-// NetworkConfig represents network configuration
-type NetworkConfig struct {
+// NetworkInterface represents a single network interface configuration
+type NetworkInterface struct {
 	Type      string   `yaml:"type" json:"type"`
+	Bridge    string   `yaml:"bridge,omitempty" json:"bridge,omitempty"`
+	Interface string   `yaml:"interface,omitempty" json:"interface,omitempty"`
+	IP        string   `yaml:"ip,omitempty" json:"ip,omitempty"`
+	Gateway   string   `yaml:"gateway,omitempty" json:"gateway,omitempty"`
+	DNS       []string `yaml:"dns,omitempty" json:"dns,omitempty"`
+	DHCP      bool     `yaml:"dhcp,omitempty" json:"dhcp,omitempty"`
+	Hostname  string   `yaml:"hostname,omitempty" json:"hostname,omitempty"`
+	MTU       int      `yaml:"mtu,omitempty" json:"mtu,omitempty"`
+	MAC       string   `yaml:"mac,omitempty" json:"mac,omitempty"`
+}
+
+// PortForward represents a port forwarding configuration
+type PortForward struct {
+	Protocol string `yaml:"protocol" json:"protocol"` // tcp or udp
+	Host     int    `yaml:"host" json:"host"`         // host port
+	Guest    int    `yaml:"guest" json:"guest"`       // container port
+}
+
+// NetworkConfig represents network configuration for a container
+type NetworkConfig struct {
+	Interfaces    []NetworkInterface `yaml:"interfaces" json:"interfaces"`
+	PortForwards  []PortForward      `yaml:"port_forwards,omitempty" json:"port_forwards,omitempty"`
+	DNSServers    []string           `yaml:"dns_servers,omitempty" json:"dns_servers,omitempty"`
+	SearchDomains []string           `yaml:"search_domains,omitempty" json:"search_domains,omitempty"`
+	Isolated      bool               `yaml:"isolated,omitempty" json:"isolated,omitempty"`
+
+	// Legacy fields for backward compatibility
+	Type      string   `yaml:"type,omitempty" json:"type,omitempty"`
 	Bridge    string   `yaml:"bridge,omitempty" json:"bridge,omitempty"`
 	Interface string   `yaml:"interface,omitempty" json:"interface,omitempty"`
 	IP        string   `yaml:"ip,omitempty" json:"ip,omitempty"`

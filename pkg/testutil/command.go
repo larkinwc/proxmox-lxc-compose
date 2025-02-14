@@ -7,7 +7,6 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
-	"proxmox-lxc-compose/pkg/config"
 	"strings"
 	"time"
 )
@@ -23,6 +22,14 @@ type MockCommandState struct {
 		name string
 		args []string
 	}
+}
+
+type containerState struct {
+	Name          string `json:"name"`
+	CreatedAt     string `json:"created_at"`
+	LastStartedAt string `json:"last_started_at,omitempty"`
+	LastStoppedAt string `json:"last_stopped_at,omitempty"`
+	Status        string `json:"status"`
 }
 
 // CommandWasCalled checks if a command was called with the given name and arguments
@@ -80,7 +87,7 @@ func SetupMockCommand(execCommand *func(string, ...string) *exec.Cmd) (*MockComm
 			if mock.debug {
 				fmt.Printf("DEBUG: Invalid args: %v\n", args)
 			}
-			return exec.Command("sh", "-c", fmt.Sprintf("echo 'Invalid arguments' >&2; exit 2"))
+			return exec.Command("sh", "-c", "echo 'Invalid arguments' >&2; exit 2")
 		}
 
 		containerName := args[1]
@@ -88,7 +95,7 @@ func SetupMockCommand(execCommand *func(string, ...string) *exec.Cmd) (*MockComm
 			if mock.debug {
 				fmt.Printf("DEBUG: Nonexistent container: %s\n", containerName)
 			}
-			return exec.Command("sh", "-c", fmt.Sprintf("echo 'Container does not exist' >&2; exit 2"))
+			return exec.Command("sh", "-c", "echo 'Container does not exist' >&2; exit 2")
 		}
 
 		state, exists := mock.ContainerStates[containerName]
@@ -108,7 +115,7 @@ func SetupMockCommand(execCommand *func(string, ...string) *exec.Cmd) (*MockComm
 			if mock.debug {
 				fmt.Printf("DEBUG: Container not found: %s\n", containerName)
 			}
-			return exec.Command("sh", "-c", fmt.Sprintf("echo 'Container does not exist' >&2; exit 2"))
+			return exec.Command("sh", "-c", "echo 'Container does not exist' >&2; exit 2")
 		}
 
 		if mock.debug {
@@ -239,18 +246,10 @@ func (m *MockCommandState) SetContainerState(containerName, state string) error 
 
 		// Create state file
 		stateFilePath := filepath.Join(statePath, containerName+".json")
-		stateData := struct {
-			Name          string            `json:"name"`
-			CreatedAt     string            `json:"created_at"`
-			LastStartedAt string            `json:"last_started_at,omitempty"`
-			LastStoppedAt string            `json:"last_stopped_at,omitempty"`
-			Config        *config.Container `json:"config"`
-			Status        string            `json:"status"`
-		}{
+		stateData := containerState{
 			Name:      containerName,
 			CreatedAt: time.Now().Format(time.RFC3339),
 			Status:    strings.ToUpper(state),
-			Config:    &config.Container{},
 		}
 
 		data, err := json.MarshalIndent(stateData, "", "  ")
@@ -307,18 +306,10 @@ func (m *MockCommandState) AddContainer(containerName, state string) {
 		}
 
 		// Create or update state file
-		stateData := struct {
-			Name          string            `json:"name"`
-			CreatedAt     string            `json:"created_at"`
-			LastStartedAt string            `json:"last_started_at,omitempty"`
-			LastStoppedAt string            `json:"last_stopped_at,omitempty"`
-			Config        *config.Container `json:"config"`
-			Status        string            `json:"status"`
-		}{
+		stateData := containerState{
 			Name:      containerName,
 			CreatedAt: time.Now().Format(time.RFC3339),
 			Status:    strings.ToUpper(state),
-			Config:    &config.Container{},
 		}
 
 		// Update timestamps based on state
@@ -427,7 +418,9 @@ func (m *MockCommandExecutor) Command(name string, args ...string) *exec.Cmd {
 		stdin, _ := cmd.StdinPipe()
 		go func() {
 			defer stdin.Close()
-			stdin.Write(output)
+			if _, err := stdin.Write(output); err != nil {
+				fmt.Printf("failed to write to stdin: %v\n", err)
+			}
 		}()
 		return cmd
 	}

@@ -37,11 +37,9 @@ func ValidateIPAddress(ip string) error {
 	}
 
 	// Split IP and CIDR if present
-	ipPart := ip
-	var cidr string
-	if idx := strings.Index(ip, "/"); idx != -1 {
-		ipPart = ip[:idx]
-		cidr = ip[idx+1:]
+	ipPart, cidr, ok := strings.Cut(ip, "/")
+	if !ok {
+		ipPart = ip
 	}
 
 	// Validate IP part
@@ -88,8 +86,8 @@ func ValidateDNSServers(servers []string) error {
 	return nil
 }
 
-// ValidateNetworkInterface validates a network interface name
-func ValidateNetworkInterface(iface string) error {
+// ValidateNetworkInterfaceName validates a network interface name
+func ValidateNetworkInterfaceName(iface string) error {
 	if iface == "" {
 		return nil // Interface name is optional
 	}
@@ -156,54 +154,151 @@ func ValidateMAC(mac string) error {
 	return nil
 }
 
-// ValidateNetworkConfig validates the complete network configuration
-func ValidateNetworkConfig(networkType, bridge, iface, ip, gateway string, dns []string, dhcp bool, hostname string, mtu int, mac string) error {
-	if err := ValidateNetworkType(networkType); err != nil {
+// ValidatePortNumber validates a port number
+func ValidatePortNumber(port int) error {
+	if port < 1 || port > 65535 {
+		return fmt.Errorf("port must be between 1 and 65535")
+	}
+	return nil
+}
+
+// ValidateProtocol validates a protocol type
+func ValidateProtocol(protocol string) error {
+	protocol = strings.ToLower(protocol)
+	if protocol != "tcp" && protocol != "udp" {
+		return fmt.Errorf("protocol must be either tcp or udp")
+	}
+	return nil
+}
+
+// ValidatePortForward validates a port forwarding configuration
+func ValidatePortForward(pf *PortForward) error {
+	if err := ValidateProtocol(pf.Protocol); err != nil {
+		return err
+	}
+	if err := ValidatePortNumber(pf.Host); err != nil {
+		return fmt.Errorf("invalid host port: %w", err)
+	}
+	if err := ValidatePortNumber(pf.Guest); err != nil {
+		return fmt.Errorf("invalid guest port: %w", err)
+	}
+	return nil
+}
+
+// ValidateSearchDomains validates DNS search domains
+func ValidateSearchDomains(domains []string) error {
+	if len(domains) == 0 {
+		return nil
+	}
+
+	for _, domain := range domains {
+		if err := ValidateHostname(domain); err != nil {
+			return fmt.Errorf("invalid search domain %q: %w", domain, err)
+		}
+	}
+	return nil
+}
+
+// ValidateNetworkInterface validates a network interface configuration
+func ValidateNetworkInterface(iface *NetworkInterface) error {
+	if err := ValidateNetworkType(iface.Type); err != nil {
 		return err
 	}
 
-	if networkType == "bridge" && bridge == "" {
+	if iface.Type == "bridge" && iface.Bridge == "" {
 		return fmt.Errorf("bridge name is required for bridge network type")
 	}
 
-	if err := ValidateNetworkInterface(iface); err != nil {
+	if err := ValidateNetworkInterfaceName(iface.Interface); err != nil {
 		return err
 	}
 
 	// Validate DHCP and static IP settings
-	if dhcp {
-		if ip != "" {
+	if iface.DHCP {
+		if iface.IP != "" {
 			return fmt.Errorf("cannot specify static IP when DHCP is enabled")
 		}
-		if gateway != "" {
+		if iface.Gateway != "" {
 			return fmt.Errorf("cannot specify gateway when DHCP is enabled")
 		}
-	} else if ip != "" {
-		if err := ValidateIPAddress(ip); err != nil {
+	} else if iface.IP != "" {
+		if err := ValidateIPAddress(iface.IP); err != nil {
 			return fmt.Errorf("invalid IP address: %w", err)
 		}
 
-		if gateway != "" {
-			if err := ValidateIPAddress(gateway); err != nil {
+		if iface.Gateway != "" {
+			if err := ValidateIPAddress(iface.Gateway); err != nil {
 				return fmt.Errorf("invalid gateway: %w", err)
 			}
 		}
 	}
 
-	if err := ValidateDNSServers(dns); err != nil {
+	if err := ValidateDNSServers(iface.DNS); err != nil {
 		return err
 	}
 
-	if err := ValidateHostname(hostname); err != nil {
+	if err := ValidateHostname(iface.Hostname); err != nil {
 		return err
 	}
 
-	if err := ValidateMTU(mtu); err != nil {
+	if err := ValidateMTU(iface.MTU); err != nil {
 		return err
 	}
 
-	if err := ValidateMAC(mac); err != nil {
+	if err := ValidateMAC(iface.MAC); err != nil {
 		return err
+	}
+
+	return nil
+}
+
+// ValidateNetworkConfig validates the complete network configuration
+func ValidateNetworkConfig(cfg *NetworkConfig) error {
+	// Support legacy configuration
+	if cfg.Type != "" {
+		// Convert legacy config to new format
+		legacyIface := NetworkInterface{
+			Type:      cfg.Type,
+			Bridge:    cfg.Bridge,
+			Interface: cfg.Interface,
+			IP:        cfg.IP,
+			Gateway:   cfg.Gateway,
+			DNS:       cfg.DNS,
+			DHCP:      cfg.DHCP,
+			Hostname:  cfg.Hostname,
+			MTU:       cfg.MTU,
+			MAC:       cfg.MAC,
+		}
+		if err := ValidateNetworkInterface(&legacyIface); err != nil {
+			return err
+		}
+	}
+
+	// Validate interfaces
+	if len(cfg.Interfaces) == 0 && cfg.Type == "" {
+		return fmt.Errorf("at least one network interface must be configured")
+	}
+
+	for i, iface := range cfg.Interfaces {
+		if err := ValidateNetworkInterface(&iface); err != nil {
+			return fmt.Errorf("interface %d: %w", i, err)
+		}
+	}
+
+	// Validate port forwards
+	for i, pf := range cfg.PortForwards {
+		if err := ValidatePortForward(&pf); err != nil {
+			return fmt.Errorf("port forward %d: %w", i, err)
+		}
+	}
+
+	// Validate DNS configuration
+	if err := ValidateDNSServers(cfg.DNSServers); err != nil {
+		return fmt.Errorf("DNS servers: %w", err)
+	}
+
+	if err := ValidateSearchDomains(cfg.SearchDomains); err != nil {
+		return fmt.Errorf("search domains: %w", err)
 	}
 
 	return nil

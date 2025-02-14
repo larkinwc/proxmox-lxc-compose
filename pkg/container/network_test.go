@@ -1,4 +1,4 @@
-package container
+package container_test
 
 import (
 	"os"
@@ -6,23 +6,23 @@ import (
 	"testing"
 
 	"proxmox-lxc-compose/pkg/config"
-	. "proxmox-lxc-compose/pkg/internal/testing"
+	"proxmox-lxc-compose/pkg/container"
+	testing_internal "proxmox-lxc-compose/pkg/internal/testing"
 )
 
 func TestConfigureNetwork(t *testing.T) {
-	dir, cleanup := TempDir(t)
+	dir, cleanup := testing_internal.TempDir(t)
 	defer cleanup()
 
 	// Create test container directory
 	containerName := "test-container"
 	containerDir := filepath.Join(dir, containerName)
 	err := os.MkdirAll(containerDir, 0755)
-	AssertNoError(t, err)
+	testing_internal.AssertNoError(t, err)
 
 	// Create manager
-	manager := &LXCManager{
-		configPath: dir,
-	}
+	manager, err := container.NewLXCManager(dir)
+	testing_internal.AssertNoError(t, err)
 
 	tests := []struct {
 		name    string
@@ -43,18 +43,18 @@ func TestConfigureNetwork(t *testing.T) {
 			},
 			verify: func(t *testing.T, configPath string) {
 				data, err := os.ReadFile(configPath)
-				AssertNoError(t, err)
+				testing_internal.AssertNoError(t, err)
 				content := string(data)
 
 				// Verify DHCP settings
-				AssertContains(t, content, "lxc.net.0.type = bridge")
-				AssertContains(t, content, "lxc.net.0.link = br0")
-				AssertContains(t, content, "lxc.net.0.name = eth0")
-				AssertContains(t, content, "lxc.net.0.ipv4.method = dhcp")
-				AssertContains(t, content, "lxc.net.0.ipv6.method = dhcp")
-				AssertContains(t, content, "lxc.net.0.hostname = test-host")
-				AssertContains(t, content, "lxc.net.0.mtu = 1500")
-				AssertContains(t, content, "lxc.net.0.hwaddr = 00:11:22:33:44:55")
+				testing_internal.AssertContains(t, content, "lxc.net.0.type = bridge")
+				testing_internal.AssertContains(t, content, "lxc.net.0.link = br0")
+				testing_internal.AssertContains(t, content, "lxc.net.0.name = eth0")
+				testing_internal.AssertContains(t, content, "lxc.net.0.ipv4.method = dhcp")
+				testing_internal.AssertContains(t, content, "lxc.net.0.ipv6.method = dhcp")
+				testing_internal.AssertContains(t, content, "lxc.net.0.hostname = test-host")
+				testing_internal.AssertContains(t, content, "lxc.net.0.mtu = 1500")
+				testing_internal.AssertContains(t, content, "lxc.net.0.hwaddr = 00:11:22:33:44:55")
 			},
 		},
 		{
@@ -72,20 +72,20 @@ func TestConfigureNetwork(t *testing.T) {
 			},
 			verify: func(t *testing.T, configPath string) {
 				data, err := os.ReadFile(configPath)
-				AssertNoError(t, err)
+				testing_internal.AssertNoError(t, err)
 				content := string(data)
 
 				// Verify static IP settings
-				AssertContains(t, content, "lxc.net.0.type = bridge")
-				AssertContains(t, content, "lxc.net.0.link = br0")
-				AssertContains(t, content, "lxc.net.0.name = eth0")
-				AssertContains(t, content, "lxc.net.0.ipv4.address = 192.168.1.100/24")
-				AssertContains(t, content, "lxc.net.0.ipv4.gateway = 192.168.1.1")
-				AssertContains(t, content, "lxc.net.0.ipv4.nameserver.0 = 8.8.8.8")
-				AssertContains(t, content, "lxc.net.0.ipv4.nameserver.1 = 8.8.4.4")
-				AssertContains(t, content, "lxc.net.0.hostname = test-host")
-				AssertContains(t, content, "lxc.net.0.mtu = 1500")
-				AssertContains(t, content, "lxc.net.0.hwaddr = 00:11:22:33:44:55")
+				testing_internal.AssertContains(t, content, "lxc.net.0.type = bridge")
+				testing_internal.AssertContains(t, content, "lxc.net.0.link = br0")
+				testing_internal.AssertContains(t, content, "lxc.net.0.name = eth0")
+				testing_internal.AssertContains(t, content, "lxc.net.0.ipv4.address = 192.168.1.100/24")
+				testing_internal.AssertContains(t, content, "lxc.net.0.ipv4.gateway = 192.168.1.1")
+				testing_internal.AssertContains(t, content, "lxc.net.0.ipv4.nameserver.0 = 8.8.8.8")
+				testing_internal.AssertContains(t, content, "lxc.net.0.ipv4.nameserver.1 = 8.8.4.4")
+				testing_internal.AssertContains(t, content, "lxc.net.0.hostname = test-host")
+				testing_internal.AssertContains(t, content, "lxc.net.0.mtu = 1500")
+				testing_internal.AssertContains(t, content, "lxc.net.0.hwaddr = 00:11:22:33:44:55")
 			},
 		},
 		{
@@ -105,12 +105,16 @@ func TestConfigureNetwork(t *testing.T) {
 			configPath := filepath.Join(containerDir, "network")
 			os.Remove(configPath) // Clean up from previous test
 
-			err := manager.configureNetwork(containerName, tt.config)
+			// Create and configure container with network config
+			containerCfg := &config.Container{
+				Network: tt.config,
+			}
+			err := manager.Create(containerName, containerCfg)
 			if tt.wantErr {
-				AssertError(t, err)
+				testing_internal.AssertError(t, err)
 				return
 			}
-			AssertNoError(t, err)
+			testing_internal.AssertNoError(t, err)
 
 			if tt.verify != nil {
 				tt.verify(t, configPath)
@@ -119,38 +123,29 @@ func TestConfigureNetwork(t *testing.T) {
 	}
 }
 
-func TestGetNetworkConfig(t *testing.T) {
-	dir, cleanup := TempDir(t)
+func TestGetContainerWithNetwork(t *testing.T) {
+	dir, cleanup := testing_internal.TempDir(t)
 	defer cleanup()
 
 	// Create test container directory
 	containerName := "test-container"
 	containerDir := filepath.Join(dir, containerName)
 	err := os.MkdirAll(containerDir, 0755)
-	AssertNoError(t, err)
+	testing_internal.AssertNoError(t, err)
 
 	// Create manager
-	manager := &LXCManager{
-		configPath: dir,
-	}
+	manager, err := container.NewLXCManager(dir)
+	testing_internal.AssertNoError(t, err)
 
 	// Test configurations
 	tests := []struct {
-		name     string
-		content  string
-		expected *config.NetworkConfig
-		wantErr  bool
+		name    string
+		config  *config.NetworkConfig
+		wantErr bool
 	}{
 		{
 			name: "DHCP configuration",
-			content: `lxc.net.0.type = bridge
-lxc.net.0.link = br0
-lxc.net.0.name = eth0
-lxc.net.0.ipv4.method = dhcp
-lxc.net.0.hostname = test-host
-lxc.net.0.mtu = 1500
-lxc.net.0.hwaddr = 00:11:22:33:44:55`,
-			expected: &config.NetworkConfig{
+			config: &config.NetworkConfig{
 				Type:      "bridge",
 				Bridge:    "br0",
 				Interface: "eth0",
@@ -162,17 +157,7 @@ lxc.net.0.hwaddr = 00:11:22:33:44:55`,
 		},
 		{
 			name: "static IP configuration",
-			content: `lxc.net.0.type = bridge
-lxc.net.0.link = br0
-lxc.net.0.name = eth0
-lxc.net.0.ipv4.address = 192.168.1.100/24
-lxc.net.0.ipv4.gateway = 192.168.1.1
-lxc.net.0.ipv4.nameserver.0 = 8.8.8.8
-lxc.net.0.ipv4.nameserver.1 = 8.8.4.4
-lxc.net.0.hostname = test-host
-lxc.net.0.mtu = 1500
-lxc.net.0.hwaddr = 00:11:22:33:44:55`,
-			expected: &config.NetworkConfig{
+			config: &config.NetworkConfig{
 				Type:      "bridge",
 				Bridge:    "br0",
 				Interface: "eth0",
@@ -185,51 +170,51 @@ lxc.net.0.hwaddr = 00:11:22:33:44:55`,
 			},
 		},
 		{
-			name:     "no config file",
-			content:  "",
-			expected: nil,
+			name:   "no network config",
+			config: nil,
 		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			configPath := filepath.Join(containerDir, "network")
-			os.Remove(configPath) // Clean up from previous test
-
-			if tt.content != "" {
-				err := os.WriteFile(configPath, []byte(tt.content), 0644)
-				AssertNoError(t, err)
+			// Create container with network config
+			containerCfg := &config.Container{
+				Network: tt.config,
 			}
+			err := manager.Create(containerName, containerCfg)
+			testing_internal.AssertNoError(t, err)
 
-			cfg, err := manager.getNetworkConfig(containerName)
+			// Get container and verify network config
+			container, err := manager.Get(containerName)
 			if tt.wantErr {
-				AssertError(t, err)
+				testing_internal.AssertError(t, err)
 				return
 			}
-			AssertNoError(t, err)
+			testing_internal.AssertNoError(t, err)
 
-			if tt.expected == nil {
-				if cfg != nil {
-					t.Error("expected nil config")
+			if tt.config == nil {
+				if container.Config.Network != nil {
+					t.Error("expected nil network config")
 				}
 				return
 			}
 
-			AssertEqual(t, tt.expected.Type, cfg.Type)
-			AssertEqual(t, tt.expected.Bridge, cfg.Bridge)
-			AssertEqual(t, tt.expected.Interface, cfg.Interface)
-			AssertEqual(t, tt.expected.DHCP, cfg.DHCP)
-			AssertEqual(t, tt.expected.IP, cfg.IP)
-			AssertEqual(t, tt.expected.Gateway, cfg.Gateway)
-			AssertEqual(t, tt.expected.Hostname, cfg.Hostname)
-			AssertEqual(t, tt.expected.MTU, cfg.MTU)
-			AssertEqual(t, tt.expected.MAC, cfg.MAC)
+			cfg := container.Config.Network
+			testing_internal.AssertEqual(t, tt.config.Type, cfg.Type)
+			testing_internal.AssertEqual(t, tt.config.Bridge, cfg.Bridge)
+			testing_internal.AssertEqual(t, tt.config.Interface, cfg.Interface)
+			testing_internal.AssertEqual(t, tt.config.DHCP, cfg.DHCP)
+			testing_internal.AssertEqual(t, tt.config.IP, cfg.IP)
+			testing_internal.AssertEqual(t, tt.config.Gateway, cfg.Gateway)
+			testing_internal.AssertEqual(t, tt.config.Hostname, cfg.Hostname)
+			testing_internal.AssertEqual(t, tt.config.MTU, cfg.MTU)
+			testing_internal.AssertEqual(t, tt.config.MAC, cfg.MAC)
 
-			if len(tt.expected.DNS) != len(cfg.DNS) {
-				t.Errorf("expected %d DNS servers, got %d", len(tt.expected.DNS), len(cfg.DNS))
+			if len(tt.config.DNS) != len(cfg.DNS) {
+				t.Errorf("expected %d DNS servers, got %d", len(tt.config.DNS), len(cfg.DNS))
 			} else {
-				for i, dns := range tt.expected.DNS {
-					AssertEqual(t, dns, cfg.DNS[i])
+				for i, dns := range tt.config.DNS {
+					testing_internal.AssertEqual(t, dns, cfg.DNS[i])
 				}
 			}
 		})

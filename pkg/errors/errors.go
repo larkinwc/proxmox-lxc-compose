@@ -11,20 +11,20 @@ const (
 	// Configuration errors
 	ErrConfig     ErrorType = "Configuration"
 	ErrValidation ErrorType = "Validation"
-	
+
 	// Runtime errors
 	ErrRuntime   ErrorType = "Runtime"
 	ErrContainer ErrorType = "Container"
 	ErrNetwork   ErrorType = "Network"
 	ErrStorage   ErrorType = "Storage"
-	
+
 	// Image related errors
-	ErrImage     ErrorType = "Image"
-	ErrRegistry  ErrorType = "Registry"
-	
+	ErrImage    ErrorType = "Image"
+	ErrRegistry ErrorType = "Registry"
+
 	// System errors
-	ErrSystem    ErrorType = "System"
-	ErrInternal  ErrorType = "Internal"
+	ErrSystem   ErrorType = "System"
+	ErrInternal ErrorType = "Internal"
 )
 
 // Error represents a structured error

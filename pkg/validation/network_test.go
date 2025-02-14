@@ -168,7 +168,7 @@ func TestValidateDNSServers(t *testing.T) {
 	}
 }
 
-func TestValidateNetworkInterface(t *testing.T) {
+func TestValidateNetworkInterfaceName(t *testing.T) {
 	tests := []struct {
 		name        string
 		iface       string
@@ -216,7 +216,7 @@ func TestValidateNetworkInterface(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			err := ValidateNetworkInterface(tt.iface)
+			err := ValidateNetworkInterfaceName(tt.iface)
 			if tt.wantErr {
 				if err == nil {
 					t.Error("expected error, got nil")
@@ -409,91 +409,96 @@ func TestValidateMAC(t *testing.T) {
 func TestValidateNetworkConfig(t *testing.T) {
 	tests := []struct {
 		name        string
-		networkType string
-		bridge      string
-		iface       string
-		ip          string
-		gateway     string
-		dns         []string
-		dhcp        bool
-		hostname    string
-		mtu         int
-		mac         string
+		config      *NetworkConfig
 		wantErr     bool
 		errContains string
 	}{
 		{
-			name:        "valid bridge config with static IP",
-			networkType: "bridge",
-			bridge:      "br0",
-			iface:       "eth0",
-			ip:          "192.168.1.100/24",
-			gateway:     "192.168.1.1",
-			dns:         []string{"8.8.8.8", "8.8.4.4"},
-			dhcp:        false,
-			hostname:    "host1",
-			mtu:         1500,
-			mac:         "00:11:22:33:44:55",
-			wantErr:     false,
+			name: "valid bridge config with static IP",
+			config: &NetworkConfig{
+				Type:      "bridge",
+				Bridge:    "br0",
+				Interface: "eth0",
+				IP:        "192.168.1.100/24",
+				Gateway:   "192.168.1.1",
+				DNS:       []string{"8.8.8.8", "8.8.4.4"},
+				DHCP:      false,
+				Hostname:  "host1",
+				MTU:       1500,
+				MAC:       "00:11:22:33:44:55",
+			},
+			wantErr: false,
 		},
 		{
-			name:        "valid bridge config with DHCP",
-			networkType: "bridge",
-			bridge:      "br0",
-			iface:       "eth0",
-			dhcp:        true,
-			hostname:    "host1",
-			mtu:         1500,
-			mac:         "00:11:22:33:44:55",
-			wantErr:     false,
+			name: "valid bridge config with DHCP",
+			config: &NetworkConfig{
+				Type:      "bridge",
+				Bridge:    "br0",
+				Interface: "eth0",
+				DHCP:      true,
+				Hostname:  "host1",
+				MTU:       1500,
+				MAC:       "00:11:22:33:44:55",
+			},
+			wantErr: false,
 		},
 		{
-			name:        "DHCP with static IP",
-			networkType: "bridge",
-			bridge:      "br0",
-			iface:       "eth0",
-			ip:          "192.168.1.100/24",
-			dhcp:        true,
+			name: "DHCP with static IP",
+			config: &NetworkConfig{
+				Type:      "bridge",
+				Bridge:    "br0",
+				Interface: "eth0",
+				IP:        "192.168.1.100/24",
+				DHCP:      true,
+			},
 			wantErr:     true,
 			errContains: "cannot specify static IP when DHCP is enabled",
 		},
 		{
-			name:        "DHCP with gateway",
-			networkType: "bridge",
-			bridge:      "br0",
-			iface:       "eth0",
-			gateway:     "192.168.1.1",
-			dhcp:        true,
+			name: "DHCP with gateway",
+			config: &NetworkConfig{
+				Type:      "bridge",
+				Bridge:    "br0",
+				Interface: "eth0",
+				Gateway:   "192.168.1.1",
+				DHCP:      true,
+			},
 			wantErr:     true,
 			errContains: "cannot specify gateway when DHCP is enabled",
 		},
 		{
-			name:        "invalid hostname",
-			networkType: "bridge",
-			bridge:      "br0",
-			iface:       "eth0",
-			dhcp:        true,
-			hostname:    "-invalid",
+			name: "invalid hostname",
+			config: &NetworkConfig{
+				Type:      "bridge",
+				Bridge:    "br0",
+				Interface: "eth0",
+				DHCP:      true,
+				Hostname:  "-invalid",
+			},
 			wantErr:     true,
 			errContains: "must start and end with alphanumeric",
 		},
 		{
-			name:        "invalid MTU",
-			networkType: "bridge",
-			bridge:      "br0",
-			iface:       "eth0",
-			dhcp:        true,
-			mtu:         50,
+			name: "invalid MTU",
+			config: &NetworkConfig{
+				Type:      "bridge",
+				Bridge:    "br0",
+				Interface: "eth0",
+				DHCP:      true,
+				MTU:       50,
+			},
 			wantErr:     true,
 			errContains: "must be between 68 and 65535",
 		},
 		{
-			name:        "invalid MAC",
-			networkType: "bridge",
-			bridge:      "br0",
-			iface:       "eth0",
-			dhcp:        true,
-			mac:         "invalid",
+			name: "invalid MAC",
+			config: &NetworkConfig{
+				Type:      "bridge",
+				Bridge:    "br0",
+				Interface: "eth0",
+				DHCP:      true,
+				MAC:       "invalid",
+			},
 			wantErr:     true,
 			errContains: "invalid MAC address",
 		},
@@ -501,18 +506,7 @@ func TestValidateNetworkConfig(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			err := ValidateNetworkConfig(
-				tt.networkType,
-				tt.bridge,
-				tt.iface,
-				tt.ip,
-				tt.gateway,
-				tt.dns,
-				tt.dhcp,
-				tt.hostname,
-				tt.mtu,
-				tt.mac,
-			)
+			err := ValidateNetworkConfig(tt.config)
 			if tt.wantErr {
 				if err == nil {
 					t.Error("expected error, got nil")
@@ -523,6 +517,214 @@ func TestValidateNetworkConfig(t *testing.T) {
 			}
 			if err != nil {
 				t.Errorf("unexpected error: %v", err)
+			}
+		})
+	}
+}
+
+func TestValidatePortNumber(t *testing.T) {
+	tests := []struct {
+		name    string
+		port    int
+		wantErr bool
+	}{
+		{
+			name:    "valid port",
+			port:    8080,
+			wantErr: false,
+		},
+		{
+			name:    "port zero",
+			port:    0,
+			wantErr: true,
+		},
+		{
+			name:    "negative port",
+			port:    -1,
+			wantErr: true,
+		},
+		{
+			name:    "port too high",
+			port:    65536,
+			wantErr: true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			err := ValidatePortNumber(tt.port)
+			if (err != nil) != tt.wantErr {
+				t.Errorf("ValidatePortNumber() error = %v, wantErr %v", err, tt.wantErr)
+			}
+		})
+	}
+}
+
+func TestValidatePortForward(t *testing.T) {
+	tests := []struct {
+		name      string
+		forward   PortForward
+		wantErr   bool
+		errString string
+	}{
+		{
+			name: "valid tcp forward",
+			forward: PortForward{
+				Protocol: "tcp",
+				Host:     8080,
+				Guest:    80,
+			},
+			wantErr: false,
+		},
+		{
+			name: "valid udp forward",
+			forward: PortForward{
+				Protocol: "UDP",
+				Host:     53,
+				Guest:    53,
+			},
+			wantErr: false,
+		},
+		{
+			name: "invalid protocol",
+			forward: PortForward{
+				Protocol: "invalid",
+				Host:     8080,
+				Guest:    80,
+			},
+			wantErr:   true,
+			errString: "protocol must be either tcp or udp",
+		},
+		{
+			name: "invalid host port",
+			forward: PortForward{
+				Protocol: "tcp",
+				Host:     0,
+				Guest:    80,
+			},
+			wantErr:   true,
+			errString: "invalid host port",
+		},
+		{
+			name: "invalid guest port",
+			forward: PortForward{
+				Protocol: "tcp",
+				Host:     8080,
+				Guest:    0,
+			},
+			wantErr:   true,
+			errString: "invalid guest port",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			err := ValidatePortForward(&tt.forward)
+			if (err != nil) != tt.wantErr {
+				t.Errorf("ValidatePortForward() error = %v, wantErr %v", err, tt.wantErr)
+			}
+			if err != nil && tt.errString != "" && !contains(err.Error(), tt.errString) {
+				t.Errorf("ValidatePortForward() error = %v, want error containing %q", err, tt.errString)
+			}
+		})
+	}
+}
+
+func TestValidateNetworkInterface(t *testing.T) {
+	tests := []struct {
+		name      string
+		iface     NetworkInterface
+		wantErr   bool
+		errString string
+	}{
+		{
+			name: "valid bridge interface",
+			iface: NetworkInterface{
+				Type:      "bridge",
+				Bridge:    "br0",
+				Interface: "eth0",
+				IP:        "192.168.1.100/24",
+				Gateway:   "192.168.1.1",
+				DNS:       []string{"8.8.8.8"},
+				Hostname:  "test-host",
+				MTU:       1500,
+				MAC:       "00:11:22:33:44:55",
+			},
+			wantErr: false,
+		},
+		{
+			name: "valid dhcp interface",
+			iface: NetworkInterface{
+				Type:      "bridge",
+				Bridge:    "br0",
+				Interface: "eth0",
+				DHCP:      true,
+			},
+			wantErr: false,
+		},
+		{
+			name: "missing bridge name",
+			iface: NetworkInterface{
+				Type:      "bridge",
+				Interface: "eth0",
+			},
+			wantErr:   true,
+			errString: "bridge name is required",
+		},
+		{
+			name: "dhcp with static ip",
+			iface: NetworkInterface{
+				Type:   "bridge",
+				Bridge: "br0",
+				DHCP:   true,
+				IP:     "192.168.1.100/24",
+			},
+			wantErr:   true,
+			errString: "cannot specify static IP when DHCP is enabled",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			err := ValidateNetworkInterface(&tt.iface)
+			if (err != nil) != tt.wantErr {
+				t.Errorf("ValidateNetworkInterface() error = %v, wantErr %v", err, tt.wantErr)
+			}
+			if err != nil && tt.errString != "" && !contains(err.Error(), tt.errString) {
+				t.Errorf("ValidateNetworkInterface() error = %v, want error containing %q", err, tt.errString)
+			}
+		})
+	}
+}
+
+func TestValidateSearchDomains(t *testing.T) {
+	tests := []struct {
+		name    string
+		domains []string
+		wantErr bool
+	}{
+		{
+			name:    "valid domains",
+			domains: []string{"example.com", "test.local"},
+			wantErr: false,
+		},
+		{
+			name:    "empty list",
+			domains: []string{},
+			wantErr: false,
+		},
+		{
+			name:    "invalid domain",
+			domains: []string{"example.com", "-invalid.com"},
+			wantErr: true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			err := ValidateSearchDomains(tt.domains)
+			if (err != nil) != tt.wantErr {
+				t.Errorf("ValidateSearchDomains() error = %v, wantErr %v", err, tt.wantErr)
 			}
 		})
 	}

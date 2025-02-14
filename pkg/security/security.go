@@ -8,14 +8,14 @@ import (
 	"proxmox-lxc-compose/pkg/errors"
 )
 
-// SecurityProfile represents container security configuration
-type SecurityProfile struct {
-	Isolation       IsolationLevel `json:"isolation"`
-	Privileged      bool           `json:"privileged"`
-	AppArmorProfile string         `json:"apparmor_profile,omitempty"`
-	SELinuxContext  string         `json:"selinux_context,omitempty"`
-	Capabilities    []string       `json:"capabilities,omitempty"`
-	SeccompProfile  string         `json:"seccomp_profile,omitempty"`
+// Profile represents container security settings
+type Profile struct {
+	Isolation      IsolationLevel `json:"isolation"`
+	Privileged     bool           `json:"privileged"`
+	AppArmorName   string         `json:"apparmor_name,omitempty"`
+	SELinuxContext string         `json:"selinux_context,omitempty"`
+	Capabilities   []string       `json:"capabilities,omitempty"`
+	SeccompProfile string         `json:"seccomp_profile,omitempty"`
 }
 
 // IsolationLevel represents the container isolation level
@@ -31,7 +31,7 @@ const (
 )
 
 // Validate checks if the security profile is valid
-func (p *SecurityProfile) Validate() error {
+func (p *Profile) Validate() error {
 	switch p.Isolation {
 	case IsolationDefault, IsolationStrict, IsolationPrivileged:
 		// Valid isolation level
@@ -39,8 +39,8 @@ func (p *SecurityProfile) Validate() error {
 		return fmt.Errorf("invalid isolation level: %s", p.Isolation)
 	}
 
-	if p.AppArmorProfile != "" {
-		if err := validateAppArmorProfile(p.AppArmorProfile); err != nil {
+	if p.AppArmorName != "" {
+		if err := validateAppArmorProfile(p.AppArmorName); err != nil {
 			return err
 		}
 	}
@@ -117,7 +117,7 @@ func validateSELinuxContext(context string) error {
 }
 
 // Apply applies the security profile to a container
-func (p *SecurityProfile) Apply(containerName string) error {
+func (p *Profile) Apply(_ string) error {
 	// Always validate before applying
 	if err := p.Validate(); err != nil {
 		return err
@@ -132,7 +132,7 @@ func (p *SecurityProfile) Apply(containerName string) error {
 		return nil
 	case IsolationStrict:
 		// Strict requires valid AppArmor/SELinux context
-		if p.AppArmorProfile == "" && p.SELinuxContext == "" {
+		if p.AppArmorName == "" && p.SELinuxContext == "" {
 			return errors.New(errors.ErrValidation, "strict isolation requires either AppArmor or SELinux configuration")
 		}
 		return nil
@@ -146,12 +146,12 @@ func (p *SecurityProfile) Apply(containerName string) error {
 	}
 }
 
-func applyAppArmorProfile(containerName, profile string) error {
-	// Implementation will interact with LXC configuration
+func applyAppArmorProfile(_ string, _ string) error {
+	// TODO: Implement AppArmor profile application
 	return nil
 }
 
-func applySELinuxContext(containerName, context string) error {
-	// Implementation will interact with LXC configuration
+func applySELinuxContext(_ string, _ string) error {
+	// TODO: Implement SELinux context application
 	return nil
 }

@@ -21,18 +21,19 @@ func validateContainerConfig(container *Container) error {
 
 	// Validate network configuration
 	if container.Network != nil {
-		err := validation.ValidateNetworkConfig(
-			container.Network.Type,
-			container.Network.Bridge,
-			container.Network.Interface,
-			container.Network.IP,
-			container.Network.Gateway,
-			container.Network.DNS,
-			container.Network.DHCP,
-			container.Network.Hostname,
-			container.Network.MTU,
-			container.Network.MAC,
-		)
+		networkCfg := &validation.NetworkConfig{
+			Type:      container.Network.Type,
+			Bridge:    container.Network.Bridge,
+			Interface: container.Network.Interface,
+			IP:        container.Network.IP,
+			Gateway:   container.Network.Gateway,
+			DNS:       container.Network.DNS,
+			DHCP:      container.Network.DHCP,
+			Hostname:  container.Network.Hostname,
+			MTU:       container.Network.MTU,
+			MAC:       container.Network.MAC,
+		}
+		err := validation.ValidateNetworkConfig(networkCfg)
 		if err != nil {
 			return fmt.Errorf("invalid network configuration: %w", err)
 		}
@@ -86,7 +87,7 @@ func validateSecurityConfig(cfg *SecurityConfig) error {
 }
 
 // isValidCapability checks if a Linux capability is valid
-func isValidCapability(cap string) bool {
+func isValidCapability(capability string) bool {
 	validCaps := map[string]bool{
 		"CHOWN":            true,
 		"DAC_OVERRIDE":     true,
@@ -127,5 +128,5 @@ func isValidCapability(cap string) bool {
 		"BLOCK_SUSPEND":    true,
 		"AUDIT_READ":       true,
 	}
-	return validCaps[cap]
+	return validCaps[capability]
 }

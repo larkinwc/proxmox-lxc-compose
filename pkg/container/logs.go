@@ -11,6 +11,14 @@ import (
 	"time"
 )
 
+// LogOptions represents options for log streaming
+type LogOptions struct {
+	Follow    bool
+	Tail      int
+	Since     time.Time
+	Timestamp bool
+}
+
 // GetLogs returns the logs for a container
 func (m *LXCManager) GetLogs(name string, opts LogOptions) (io.ReadCloser, error) {
 	if !m.ContainerExists(name) {
@@ -53,7 +61,7 @@ func (m *LXCManager) FollowLogs(name string, w io.Writer) error {
 }
 
 // followLogs returns a ReadCloser that follows the log output
-func (m *LXCManager) followLogs(name string, file io.ReadCloser, opts LogOptions) (io.ReadCloser, error) {
+func (m *LXCManager) followLogs(name string, file io.ReadCloser, _ LogOptions) (io.ReadCloser, error) {
 	// Use lxc-attach to tail the logs
 	cmd := execCommand("lxc-attach", "-n", name, "--", "tail", "-f", "/var/log/console.log")
 	stdout, err := cmd.StdoutPipe()

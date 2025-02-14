@@ -3,40 +3,92 @@ package config
 import (
 	"fmt"
 	"os"
-	"path/filepath"
-	"regexp"
-
 	"proxmox-lxc-compose/pkg/validation"
 
 	"gopkg.in/yaml.v3"
 )
 
-// LoadConfig loads and parses the lxc-compose.yml file
-func LoadConfig(path string) (*ComposeConfig, error) {
-	if path == "" {
-		path = "lxc-compose.yml"
-	}
-
-	absPath, err := filepath.Abs(path)
-	if err != nil {
-		return nil, fmt.Errorf("failed to get absolute path: %w", err)
-	}
-
-	data, err := os.ReadFile(absPath)
+// Load loads a configuration from a file
+func Load(path string) (*Container, error) {
+	data, err := os.ReadFile(path)
 	if err != nil {
 		return nil, fmt.Errorf("failed to read config file: %w", err)
 	}
 
-	var config ComposeConfig
-	if err := yaml.Unmarshal(data, &config); err != nil {
+	var container Container
+	if err := yaml.Unmarshal(data, &container); err != nil {
 		return nil, fmt.Errorf("failed to parse config file: %w", err)
 	}
 
-	if err := validateConfig(&config); err != nil {
-		return nil, fmt.Errorf("invalid config: %w", err)
+	if err := Validate(&container); err != nil {
+		return nil, err
 	}
 
-	return &config, nil
+	return &container, nil
+}
+
+func toValidationNetworkConfig(cfg *NetworkConfig) *validation.NetworkConfig {
+	if cfg == nil {
+		return nil
+	}
+
+	// Convert to validation package's type
+	return &validation.NetworkConfig{
+		Type:      cfg.Type,
+		Bridge:    cfg.Bridge,
+		Interface: cfg.Interface,
+		IP:        cfg.IP,
+		Gateway:   cfg.Gateway,
+		DNS:       cfg.DNS,
+		DHCP:      cfg.DHCP,
+		Hostname:  cfg.Hostname,
+		MTU:       cfg.MTU,
+		MAC:       cfg.MAC,
+	}
+}
+
+func toValidationSecurityProfile(cfg *SecurityConfig) *validation.SecurityProfile {
+	if cfg == nil {
+		return nil
+	}
+	return &validation.SecurityProfile{
+		Isolation:    cfg.Isolation,
+		Privileged:   cfg.Privileged,
+		Capabilities: cfg.Capabilities,
+	}
+}
+
+// Validate validates a container configuration
+func Validate(container *Container) error {
+	if container == nil {
+		return fmt.Errorf("container configuration is required")
+	}
+
+	// Validate storage configuration
+	if container.Storage != nil {
+		bytes, err := validation.ValidateStorageSize(container.Storage.Root)
+		if err != nil {
+			return fmt.Errorf("invalid storage configuration: %w", err)
+		}
+		// Format the size consistently
+		container.Storage.Root = validation.FormatBytes(bytes)
+	}
+
+	// Validate network configuration
+	if container.Network != nil {
+		if err := validation.ValidateNetworkConfig(toValidationNetworkConfig(container.Network)); err != nil {
+			return fmt.Errorf("invalid network configuration: %w", err)
+		}
+	}
+
+	// Validate security configuration
+	if container.Security != nil {
+		if err := validation.ValidateSecurityProfile(toValidationSecurityProfile(container.Security)); err != nil {
+			return fmt.Errorf("invalid security configuration: %w", err)
+		}
+	}
+
+	return nil
 }
 
 // validateConfig performs basic validation of the configuration
@@ -76,12 +128,3 @@ func validateContainer(name string, container *Container) error {
 
 	return nil
 }
-
-// validateStorageSize validates a storage size string
-func validateStorageSize(size string) error {
-	_, err := validation.ValidateStorageSize(size)
-	return err
-}
-
-// Regular expression for validating storage size format
-var sizeRegex = regexp.MustCompile(`(?i)^\d+[BKMGTP]B?$`)

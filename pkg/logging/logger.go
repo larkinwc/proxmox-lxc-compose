@@ -50,8 +50,8 @@ func Init(cfg Config) error {
 
 	// Create logger configuration
 	config := zap.Config{
-		Level:             Level,
-		Development:       cfg.Development,
+		Level:            Level,
+		Development:      cfg.Development,
 		DisableCaller:    cfg.DisableCaller,
 		Encoding:         "json",
 		EncoderConfig:    encoderConfig,

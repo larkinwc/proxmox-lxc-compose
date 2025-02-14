@@ -416,3 +416,100 @@ func TestStartStop(t *testing.T) {
 		AssertError(t, err)
 	})
 }
+
+func TestCreateRemove(t *testing.T) {
+	containerName := "test-container-create"
+	configPath := t.TempDir()
+
+	// Create state directory
+	statePath := filepath.Join(configPath, "state")
+	err := os.MkdirAll(statePath, 0755)
+	AssertNoError(t, err)
+
+	// Set config path for mock command
+	os.Setenv("CONTAINER_CONFIG_PATH", configPath)
+	defer os.Unsetenv("CONTAINER_CONFIG_PATH")
+
+	mock, cleanup := mock.SetupMockCommand(&execCommand)
+	defer cleanup()
+
+	manager, err := NewLXCManager(configPath)
+	AssertNoError(t, err)
+
+	t.Run("create_new_container", func(t *testing.T) {
+		cfg := &config.Container{
+			Image: "ubuntu:20.04",
+			Network: &config.NetworkConfig{
+				Type: "bridge",
+			},
+		}
+
+		// Create container
+		err := manager.Create(containerName, cfg)
+		AssertNoError(t, err)
+
+		// Verify container exists
+		exists := manager.ContainerExists(containerName)
+		AssertEqual(t, true, exists)
+
+		// Verify container state
+		container, err := manager.Get(containerName)
+		AssertNoError(t, err)
+		AssertEqual(t, "STOPPED", container.State)
+		AssertEqual(t, cfg, container.Config)
+	})
+
+	t.Run("create_existing_container", func(t *testing.T) {
+		cfg := &config.Container{
+			Image: "ubuntu:20.04",
+		}
+
+		// Try to create container with same name
+		err := manager.Create(containerName, cfg)
+		AssertError(t, err)
+	})
+
+	t.Run("remove_stopped_container", func(t *testing.T) {
+		// Verify container exists and is stopped
+		container, err := manager.Get(containerName)
+		AssertNoError(t, err)
+		AssertEqual(t, "STOPPED", container.State)
+
+		// Remove container
+		err = manager.Remove(containerName)
+		AssertNoError(t, err)
+
+		// Verify container no longer exists
+		exists := manager.ContainerExists(containerName)
+		AssertEqual(t, false, exists)
+
+		// Verify state is removed
+		_, err = manager.state.GetContainerState(containerName)
+		AssertError(t, err)
+	})
+
+	t.Run("remove_running_container", func(t *testing.T) {
+		// Create new container
+		cfg := &config.Container{Image: "ubuntu:20.04"}
+		err := manager.Create(containerName, cfg)
+		AssertNoError(t, err)
+
+		// Set container state to running
+		mock.AddContainer(containerName, "RUNNING")
+		err = manager.state.SaveContainerState(containerName, cfg, "RUNNING")
+		AssertNoError(t, err)
+
+		// Try to remove running container
+		err = manager.Remove(containerName)
+		AssertError(t, err)
+
+		// Verify container still exists
+		exists := manager.ContainerExists(containerName)
+		AssertEqual(t, true, exists)
+	})
+
+	t.Run("remove_nonexistent_container", func(t *testing.T) {
+		err := manager.Remove("nonexistent")
+		AssertError(t, err)
+	})
+}
