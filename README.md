@@ -1,11 +1,18 @@
 # proxmox-lxc-compose
 
-A CLI tool that allows you to manage LXC containers using a docker-compose like syntax.
+A docker-compose like tool for managing LXC containers in Proxmox.
 
 ## Project Overview
 The main purpose of the CLI is to read a lxc-compose.yml file and use it to create, start, stop, and update LXC containers. The tool validates YAML configuration files and ensures they contain the required minimum set of keys.
 
 ## Features
+
+- Docker-compose style configuration for LXC containers
+- Image management with OCI registry support
+- Local image caching
+- Structured logging
+- Robust error handling with retries
+- Configuration management via YAML/environment variables
 
 ### Completed Features
 - Basic project structure and CLI framework setup
@@ -101,7 +108,7 @@ The main purpose of the CLI is to read a lxc-compose.yml file and use it to crea
 ## Installation
 
 ```bash
-go install github.com/larkinwc/proxmox-lxc-compose@latest
+go install github.com/yourusername/proxmox-lxc-compose@latest
 ```
 
 Or build from source:
@@ -112,7 +119,40 @@ cd proxmox-lxc-compose
 go build -o lxc-compose ./cmd/lxc-compose
 ```
 
+## Configuration
+
+Configuration can be provided via:
+- Configuration file (default: ~/.lxc-compose.yaml)
+- Environment variables
+- Command line flags
+
+### Global Flags
+
+- `--config`: Config file path (default: ~/.lxc-compose.yaml)
+- `--debug`: Enable debug logging
+- `--dev`: Enable development mode
+
 ## Usage
+
+```bash
+# Start containers
+lxc-compose up
+
+# Stop containers
+lxc-compose down
+
+# View container status
+lxc-compose ps
+
+# View container logs
+lxc-compose logs [container_name]
+
+# Pull container images
+lxc-compose pull [image_name]
+
+# Convert Docker images to LXC
+lxc-compose convert [image_name]
+```
 
 ### Converting OCI Images to LXC Templates
 
@@ -149,6 +189,14 @@ services:
       DB_PORT: 5432
     command: ["nginx", "-g", "daemon off;"]
 ```
+
+## Development
+
+### Prerequisites
+
+- Go 1.23.4 or higher
+- Access to Proxmox system
+- Docker (for image conversion)
 
 ## Contributing
 
