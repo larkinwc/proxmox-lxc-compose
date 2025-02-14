@@ -34,6 +34,10 @@ The main purpose of the CLI is to read a lxc-compose.yml file and use it to crea
   - Basic YAML parsing
   - Configuration type definitions
   - Basic validation logic
+  - Advanced configuration validation
+    - Network validation (types, IP, DNS, interfaces, etc.)
+    - Storage validation
+    - Resource limits validation
 - Advanced configuration options
   - CPU and memory limits
   - Network settings
@@ -58,7 +62,9 @@ The main purpose of the CLI is to read a lxc-compose.yml file and use it to crea
   - Unit tests for state management
   - Unit tests for configuration parsing
   - Unit tests for container logging
-  - Unit tests for container management (pause/resume)
+  - Unit tests for container management
+    - Pause/resume operations
+    - Start/stop operations
 
 ### In Progress Features
 - Container templates
@@ -76,10 +82,6 @@ The main purpose of the CLI is to read a lxc-compose.yml file and use it to crea
   - Pull OCI images from registry
 
 ### Planned Features
-- Advanced validation
-  - Network configuration validation
-  - Storage configuration validation
-  - Resource limits validation
 - Proper error handling and logging
   - Structured logging
   - Debug mode
