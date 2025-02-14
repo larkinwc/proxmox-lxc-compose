@@ -3,15 +3,20 @@ package container
 import (
 	"os"
 	"path/filepath"
-	"testing"
-
 	"proxmox-lxc-compose/pkg/testutil"
+	"testing"
 )
+
+// Save the original exec.Command
+var origExecCommand = execCommand
 
 func TestTemplateManagement(t *testing.T) {
 	// Create temporary directory for tests
 	tempDir, cleanup := testutil.TempDir(t)
 	defer cleanup()
+
+	// Reset execCommand after the test
+	defer func() { execCommand = origExecCommand }()
 
 	// Create state manager
 	stateManager, err := NewStateManager(filepath.Join(tempDir, "state"))

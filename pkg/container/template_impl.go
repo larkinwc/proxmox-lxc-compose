@@ -2,46 +2,52 @@ package container
 
 import (
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
+	"strings"
 )
 
-// Template represents a container template
+// Template represents an LXC container template
 type Template struct {
 	Name        string
 	Description string
 	Path        string
 }
 
-// CreateTemplate creates a new template from an existing container
+// CreateTemplate creates a template from an existing container
 func (m *LXCManager) CreateTemplate(containerName, templateName, description string) error {
-	// Check if container exists
 	if !m.ContainerExists(containerName) {
 		return fmt.Errorf("container %s does not exist", containerName)
 	}
 
-	// Check if template already exists
-	templatePath := filepath.Join(m.configPath, "templates", templateName)
+	templatesPath := filepath.Join(m.configPath, "templates")
+	if err := os.MkdirAll(templatesPath, 0755); err != nil {
+		return fmt.Errorf("failed to create templates directory: %w", err)
+	}
+
+	templatePath := filepath.Join(templatesPath, templateName)
 	if _, err := os.Stat(templatePath); err == nil {
 		return fmt.Errorf("template %s already exists", templateName)
 	}
 
-	// Create templates directory if it doesn't exist
-	templatesDir := filepath.Join(m.configPath, "templates")
-	if err := os.MkdirAll(templatesDir, 0755); err != nil {
-		return fmt.Errorf("failed to create templates directory: %w", err)
+	// Create template directory
+	if err := os.MkdirAll(templatePath, 0755); err != nil {
+		return fmt.Errorf("failed to create template directory: %w", err)
 	}
 
-	// Copy container config to template directory
+	// Copy container files to template
 	containerPath := filepath.Join(m.configPath, containerName)
 	if err := copyDir(containerPath, templatePath); err != nil {
-		return fmt.Errorf("failed to copy container to template: %w", err)
+		os.RemoveAll(templatePath)
+		return fmt.Errorf("failed to copy container files: %w", err)
 	}
 
-	// Create template metadata file
+	// Write metadata file
 	metadata := fmt.Sprintf("description=%s\n", description)
 	if err := os.WriteFile(filepath.Join(templatePath, "metadata"), []byte(metadata), 0644); err != nil {
-		return fmt.Errorf("failed to write template metadata: %w", err)
+		os.RemoveAll(templatePath)
+		return fmt.Errorf("failed to write metadata: %w", err)
 	}
 
 	return nil
@@ -49,13 +55,12 @@ func (m *LXCManager) CreateTemplate(containerName, templateName, description str
 
 // ListTemplates returns a list of available templates
 func (m *LXCManager) ListTemplates() ([]Template, error) {
-	templatesDir := filepath.Join(m.configPath, "templates")
-	if _, err := os.Stat(templatesDir); os.IsNotExist(err) {
-		return nil, nil
-	}
-
-	entries, err := os.ReadDir(templatesDir)
+	templatesPath := filepath.Join(m.configPath, "templates")
+	entries, err := os.ReadDir(templatesPath)
 	if err != nil {
+		if os.IsNotExist(err) {
+			return []Template{}, nil
+		}
 		return nil, fmt.Errorf("failed to read templates directory: %w", err)
 	}
 
@@ -65,21 +70,17 @@ func (m *LXCManager) ListTemplates() ([]Template, error) {
 			continue
 		}
 
-		templatePath := filepath.Join(templatesDir, entry.Name())
+		templatePath := filepath.Join(templatesPath, entry.Name())
 		metadata, err := os.ReadFile(filepath.Join(templatePath, "metadata"))
 		if err != nil {
 			continue
 		}
 
 		description := ""
-		if len(metadata) > 0 {
-			// Parse description=value format
-			content := string(metadata)
-			if prefix := "description="; len(content) > len(prefix) && content[:len(prefix)] == prefix {
-				description = content[len(prefix):]
-				if description[len(description)-1] == '\n' {
-					description = description[:len(description)-1]
-				}
+		for _, line := range strings.Split(string(metadata), "\n") {
+			if strings.HasPrefix(line, "description=") {
+				description = strings.TrimPrefix(line, "description=")
+				break
 			}
 		}
 
@@ -93,10 +94,62 @@ func (m *LXCManager) ListTemplates() ([]Template, error) {
 	return templates, nil
 }
 
-// DeleteTemplate removes a template
+// CreateContainerFromTemplate creates a new container from a template
+func (m *LXCManager) CreateContainerFromTemplate(templateName, containerName string) error {
+	templatesPath := filepath.Join(m.configPath, "templates")
+	templatePath := filepath.Join(templatesPath, templateName)
+	if _, err := os.Stat(templatePath); err != nil {
+		return fmt.Errorf("template %s does not exist", templateName)
+	}
+
+	containerPath := filepath.Join(m.configPath, containerName)
+	if _, err := os.Stat(containerPath); err == nil {
+		return fmt.Errorf("container %s already exists", containerName)
+	}
+
+	// Create container directory
+	if err := os.MkdirAll(containerPath, 0755); err != nil {
+		return fmt.Errorf("failed to create container directory: %w", err)
+	}
+
+	// Copy template files to container directory, excluding metadata
+	err := filepath.Walk(templatePath, func(path string, info os.FileInfo, err error) error {
+		if err != nil {
+			return err
+		}
+
+		// Skip metadata file
+		if info.Name() == "metadata" {
+			return nil
+		}
+
+		relPath, err := filepath.Rel(templatePath, path)
+		if err != nil {
+			return err
+		}
+
+		destPath := filepath.Join(containerPath, relPath)
+
+		if info.IsDir() {
+			return os.MkdirAll(destPath, info.Mode())
+		}
+
+		return copyFile(path, destPath)
+	})
+
+	if err != nil {
+		os.RemoveAll(containerPath)
+		return fmt.Errorf("failed to copy template files: %w", err)
+	}
+
+	return nil
+}
+
+// DeleteTemplate deletes a template
 func (m *LXCManager) DeleteTemplate(templateName string) error {
-	templatePath := filepath.Join(m.configPath, "templates", templateName)
-	if _, err := os.Stat(templatePath); os.IsNotExist(err) {
+	templatesPath := filepath.Join(m.configPath, "templates")
+	templatePath := filepath.Join(templatesPath, templateName)
+	if _, err := os.Stat(templatePath); err != nil {
 		return fmt.Errorf("template %s does not exist", templateName)
 	}
 
@@ -107,60 +160,49 @@ func (m *LXCManager) DeleteTemplate(templateName string) error {
 	return nil
 }
 
-// CreateContainerFromTemplate creates a new container from a template
-func (m *LXCManager) CreateContainerFromTemplate(templateName, containerName string) error {
-	templatePath := filepath.Join(m.configPath, "templates", templateName)
-	if _, err := os.Stat(templatePath); os.IsNotExist(err) {
-		return fmt.Errorf("template %s does not exist", templateName)
+// Helper functions for copying files and directories
+func copyFile(src, dst string) error {
+	sourceFile, err := os.Open(src)
+	if err != nil {
+		return err
 	}
+	defer sourceFile.Close()
 
-	containerPath := filepath.Join(m.configPath, containerName)
-	if _, err := os.Stat(containerPath); err == nil {
-		return fmt.Errorf("container %s already exists", containerName)
+	destFile, err := os.Create(dst)
+	if err != nil {
+		return err
 	}
+	defer destFile.Close()
 
-	// Copy template to new container directory
-	if err := copyDir(templatePath, containerPath); err != nil {
-		return fmt.Errorf("failed to create container from template: %w", err)
-	}
-
-	// Remove metadata file from container directory
-	if err := os.Remove(filepath.Join(containerPath, "metadata")); err != nil && !os.IsNotExist(err) {
-		return fmt.Errorf("failed to remove template metadata: %w", err)
-	}
-
-	return nil
-}
-
-// copyDir recursively copies a directory tree
-func copyDir(src, dst string) error {
-	if err := os.MkdirAll(dst, 0755); err != nil {
+	if _, err := io.Copy(destFile, sourceFile); err != nil {
 		return err
 	}
 
-	entries, err := os.ReadDir(src)
+	sourceInfo, err := os.Stat(src)
 	if err != nil {
 		return err
 	}
 
-	for _, entry := range entries {
-		srcPath := filepath.Join(src, entry.Name())
-		dstPath := filepath.Join(dst, entry.Name())
+	return os.Chmod(dst, sourceInfo.Mode())
+}
 
-		if entry.IsDir() {
-			if err := copyDir(srcPath, dstPath); err != nil {
-				return err
-			}
-		} else {
-			data, err := os.ReadFile(srcPath)
-			if err != nil {
-				return err
-			}
-			if err := os.WriteFile(dstPath, data, 0644); err != nil {
-				return err
-			}
+func copyDir(src, dst string) error {
+	return filepath.Walk(src, func(path string, info os.FileInfo, err error) error {
+		if err != nil {
+			return err
 		}
-	}
 
-	return nil
+		relPath, err := filepath.Rel(src, path)
+		if err != nil {
+			return err
+		}
+
+		destPath := filepath.Join(dst, relPath)
+
+		if info.IsDir() {
+			return os.MkdirAll(destPath, info.Mode())
+		}
+
+		return copyFile(path, destPath)
+	})
 }

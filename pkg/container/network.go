@@ -1,6 +1,7 @@
 package container
 
 import (
+	"bufio"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -10,98 +11,59 @@ import (
 	"proxmox-lxc-compose/pkg/config"
 )
 
-// configureNetwork configures the network for a container
+// configureNetwork configures network settings for a container
 func (m *LXCManager) configureNetwork(name string, cfg *config.NetworkConfig) error {
 	if cfg == nil {
 		return nil
 	}
 
-	// Get container's network config file path
-	networkConfigPath := filepath.Join(m.configPath, name, "network")
+	configPath := filepath.Join(m.configPath, name, "network")
+	var lines []string
 
-	// Create network config file
-	f, err := os.Create(networkConfigPath)
-	if err != nil {
-		return fmt.Errorf("failed to create network config file: %w", err)
-	}
-	defer f.Close()
+	// Basic network config
+	lines = append(lines,
+		fmt.Sprintf("lxc.net.0.type = %s", cfg.Type),
+		fmt.Sprintf("lxc.net.0.link = %s", cfg.Bridge),
+		fmt.Sprintf("lxc.net.0.name = %s", cfg.Interface),
+	)
 
-	// Write network type and interface
-	if err := writeConfig(f, "lxc.net.0.type", cfg.Type); err != nil {
-		return err
-	}
-
-	if cfg.Interface != "" {
-		if err := writeConfig(f, "lxc.net.0.name", cfg.Interface); err != nil {
-			return err
-		}
-	}
-
-	// Configure bridge if specified
-	if cfg.Bridge != "" {
-		if err := writeConfig(f, "lxc.net.0.link", cfg.Bridge); err != nil {
-			return err
-		}
-	}
-
-	// Configure DHCP or static IP
+	// IP configuration
 	if cfg.DHCP {
-		if err := writeConfig(f, "lxc.net.0.ipv4.method", "dhcp"); err != nil {
-			return err
-		}
-		if err := writeConfig(f, "lxc.net.0.ipv6.method", "dhcp"); err != nil {
-			return err
-		}
+		lines = append(lines,
+			"lxc.net.0.ipv4.method = dhcp",
+			"lxc.net.0.ipv6.method = dhcp",
+		)
 	} else if cfg.IP != "" {
-		if err := writeConfig(f, "lxc.net.0.ipv4.address", cfg.IP); err != nil {
-			return err
-		}
+		lines = append(lines, fmt.Sprintf("lxc.net.0.ipv4.address = %s", cfg.IP))
 		if cfg.Gateway != "" {
-			if err := writeConfig(f, "lxc.net.0.ipv4.gateway", cfg.Gateway); err != nil {
-				return err
-			}
+			lines = append(lines, fmt.Sprintf("lxc.net.0.ipv4.gateway = %s", cfg.Gateway))
 		}
 	}
 
-	// Configure DNS servers
-	if len(cfg.DNS) > 0 {
-		for i, dns := range cfg.DNS {
-			key := fmt.Sprintf("lxc.net.0.ipv4.nameserver.%d", i)
-			if err := writeConfig(f, key, dns); err != nil {
-				return err
-			}
-		}
+	// DNS servers
+	for i, dns := range cfg.DNS {
+		lines = append(lines, fmt.Sprintf("lxc.net.0.ipv4.nameserver.%d = %s", i, dns))
 	}
 
-	// Configure hostname if specified
+	// Optional settings
 	if cfg.Hostname != "" {
-		if err := writeConfig(f, "lxc.net.0.hostname", cfg.Hostname); err != nil {
-			return err
-		}
+		lines = append(lines, fmt.Sprintf("lxc.net.0.hostname = %s", cfg.Hostname))
 	}
-
-	// Configure MTU if specified
 	if cfg.MTU > 0 {
-		if err := writeConfig(f, "lxc.net.0.mtu", fmt.Sprintf("%d", cfg.MTU)); err != nil {
-			return err
-		}
+		lines = append(lines, fmt.Sprintf("lxc.net.0.mtu = %d", cfg.MTU))
 	}
-
-	// Configure MAC address if specified
 	if cfg.MAC != "" {
-		if err := writeConfig(f, "lxc.net.0.hwaddr", strings.ToUpper(cfg.MAC)); err != nil {
-			return err
-		}
+		lines = append(lines, fmt.Sprintf("lxc.net.0.hwaddr = %s", cfg.MAC))
 	}
 
-	return nil
+	// Write config file
+	return os.WriteFile(configPath, []byte(strings.Join(lines, "\n")+"\n"), 0644)
 }
 
-// getNetworkConfig retrieves the current network configuration of a container
+// getNetworkConfig reads network configuration from a container's config file
 func (m *LXCManager) getNetworkConfig(name string) (*config.NetworkConfig, error) {
-	networkConfigPath := filepath.Join(m.configPath, name, "network")
-
-	data, err := os.ReadFile(networkConfigPath)
+	configPath := filepath.Join(m.configPath, name, "network")
+	data, err := os.ReadFile(configPath)
 	if err != nil {
 		if os.IsNotExist(err) {
 			return nil, nil
@@ -110,10 +72,11 @@ func (m *LXCManager) getNetworkConfig(name string) (*config.NetworkConfig, error
 	}
 
 	cfg := &config.NetworkConfig{}
-	lines := strings.Split(string(data), "\n")
+	var dns []string
 
-	for _, line := range lines {
-		line = strings.TrimSpace(line)
+	scanner := bufio.NewScanner(strings.NewReader(string(data)))
+	for scanner.Scan() {
+		line := strings.TrimSpace(scanner.Text())
 		if line == "" || strings.HasPrefix(line, "#") {
 			continue
 		}
@@ -129,10 +92,10 @@ func (m *LXCManager) getNetworkConfig(name string) (*config.NetworkConfig, error
 		switch key {
 		case "lxc.net.0.type":
 			cfg.Type = value
-		case "lxc.net.0.name":
-			cfg.Interface = value
 		case "lxc.net.0.link":
 			cfg.Bridge = value
+		case "lxc.net.0.name":
+			cfg.Interface = value
 		case "lxc.net.0.ipv4.method":
 			cfg.DHCP = value == "dhcp"
 		case "lxc.net.0.ipv4.address":
@@ -142,15 +105,24 @@ func (m *LXCManager) getNetworkConfig(name string) (*config.NetworkConfig, error
 		case "lxc.net.0.hostname":
 			cfg.Hostname = value
 		case "lxc.net.0.mtu":
-			mtu, _ := strconv.Atoi(value)
-			cfg.MTU = mtu
+			if mtu, err := strconv.Atoi(value); err == nil {
+				cfg.MTU = mtu
+			}
 		case "lxc.net.0.hwaddr":
 			cfg.MAC = value
+		default:
+			if strings.HasPrefix(key, "lxc.net.0.ipv4.nameserver.") {
+				dns = append(dns, value)
+			}
 		}
+	}
 
-		if strings.HasPrefix(key, "lxc.net.0.ipv4.nameserver.") {
-			cfg.DNS = append(cfg.DNS, value)
-		}
+	if err := scanner.Err(); err != nil {
+		return nil, fmt.Errorf("failed to parse network config: %w", err)
+	}
+
+	if len(dns) > 0 {
+		cfg.DNS = dns
 	}
 
 	return cfg, nil

@@ -5,123 +5,39 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"time"
 )
 
-// LogOptions represents options for retrieving container logs
-type LogOptions struct {
-	Follow    bool      // Follow log output
-	Since     time.Time // Show logs since timestamp
-	Tail      int       // Number of lines to show from the end of the logs
-	Timestamp bool      // Show timestamps
-}
-
-// GetLogs retrieves logs for a container
+// GetLogs returns the logs for a container
 func (m *LXCManager) GetLogs(name string, opts LogOptions) (io.ReadCloser, error) {
-	// Check if container exists
-	if _, err := m.Get(name); err != nil {
-		return nil, fmt.Errorf("container not found: %w", err)
+	if !m.ContainerExists(name) {
+		return nil, fmt.Errorf("container %s does not exist", name)
 	}
 
-	// Get log file path
 	logPath := filepath.Join(m.configPath, name, "console.log")
-	if _, err := os.Stat(logPath); err != nil {
-		return nil, fmt.Errorf("log file not found: %w", err)
-	}
-
-	// If not following logs, just return the file
-	if !opts.Follow {
-		file, err := os.Open(logPath)
-		if err != nil {
-			return nil, fmt.Errorf("failed to open log file: %w", err)
-		}
-
-		// Apply filters
-		if opts.Since.IsZero() && opts.Tail == 0 {
-			return file, nil
-		}
-
-		// Create filtered reader
-		pr, pw := io.Pipe()
-		go func() {
-			defer pw.Close()
-			defer file.Close()
-
-			scanner := bufio.NewScanner(file)
-			var lines []string
-			for scanner.Scan() {
-				line := scanner.Text()
-
-				// Filter by timestamp if requested
-				if !opts.Since.IsZero() {
-					// Extract timestamp from brackets [TIMESTAMP]
-					if len(line) > 2 && line[0] == '[' {
-						closeBracket := strings.Index(line, "]")
-						if closeBracket > 0 {
-							tsStr := line[1:closeBracket]
-							if ts, err := time.Parse(time.RFC3339, tsStr); err == nil {
-								if ts.Before(opts.Since) {
-									continue
-								}
-							}
-						}
-					}
-				}
-
-				if opts.Tail > 0 {
-					// Store lines for tail
-					lines = append(lines, line)
-					if len(lines) > opts.Tail {
-						lines = lines[1:]
-					}
-				} else {
-					fmt.Fprintln(pw, line)
-				}
-			}
-
-			// Write tail lines
-			if opts.Tail > 0 {
-				for _, line := range lines {
-					fmt.Fprintln(pw, line)
-				}
-			}
-		}()
-
-		return pr, nil
-	}
-
-	// For following logs, use lxc-attach to tail the log file
-	cmd := execCommand("lxc-attach", "-n", name, "--", "tail", "-f", "/var/log/console.log")
-	stdout, err := cmd.StdoutPipe()
+	file, err := os.Open(logPath)
 	if err != nil {
-		return nil, fmt.Errorf("failed to get stdout pipe: %w", err)
+		return nil, fmt.Errorf("failed to open log file: %w", err)
 	}
 
-	if err := cmd.Start(); err != nil {
-		return nil, fmt.Errorf("failed to start log tail: %w", err)
+	if opts.Follow {
+		return m.followLogs(name, file, opts)
 	}
 
-	// Create a pipe that will be closed when the command exits
-	pr, pw := io.Pipe()
-	go func() {
-		defer pw.Close()
-		scanner := bufio.NewScanner(stdout)
-		for scanner.Scan() {
-			line := scanner.Text()
-			if opts.Timestamp {
-				fmt.Fprintf(pw, "[%s] %s\n", time.Now().Format(time.RFC3339), line)
-			} else {
-				fmt.Fprintln(pw, line)
-			}
+	// If we're not following, handle tail and since options
+	if opts.Tail > 0 || !opts.Since.IsZero() {
+		filtered, err := m.filterLogs(file, opts)
+		if err != nil {
+			file.Close()
+			return nil, err
 		}
-		if err := cmd.Wait(); err != nil {
-			fmt.Printf("Warning: log following ended with error: %v\n", err)
-		}
-	}()
+		return io.NopCloser(filtered), nil
+	}
 
-	return pr, nil
+	return file, nil
 }
 
 // FollowLogs follows the logs of a container and writes them to the given writer
@@ -134,4 +50,81 @@ func (m *LXCManager) FollowLogs(name string, w io.Writer) error {
 
 	_, err = io.Copy(w, logs)
 	return err
+}
+
+// followLogs returns a ReadCloser that follows the log output
+func (m *LXCManager) followLogs(name string, file io.ReadCloser, opts LogOptions) (io.ReadCloser, error) {
+	// Use lxc-attach to tail the logs
+	cmd := execCommand("lxc-attach", "-n", name, "--", "tail", "-f", "/var/log/console.log")
+	stdout, err := cmd.StdoutPipe()
+	if err != nil {
+		file.Close()
+		return nil, fmt.Errorf("failed to get stdout pipe: %w", err)
+	}
+
+	if err := cmd.Start(); err != nil {
+		file.Close()
+		return nil, fmt.Errorf("failed to start log following: %w", err)
+	}
+
+	return &logReader{
+		cmd:    cmd,
+		stdout: stdout,
+		file:   file,
+	}, nil
+}
+
+// filterLogs returns a reader that filters log lines based on options
+func (m *LXCManager) filterLogs(r io.Reader, opts LogOptions) (io.Reader, error) {
+	var lines []string
+	scanner := bufio.NewScanner(r)
+	for scanner.Scan() {
+		line := scanner.Text()
+
+		// Parse timestamp if present
+		var lineTime time.Time
+		if strings.HasPrefix(line, "[") && strings.Contains(line, "]") {
+			ts := strings.TrimPrefix(strings.Split(line, "]")[0], "[")
+			if t, err := time.Parse(time.RFC3339, ts); err == nil {
+				lineTime = t
+			}
+		}
+
+		// Filter by since if specified
+		if !opts.Since.IsZero() && !lineTime.IsZero() && lineTime.Before(opts.Since) {
+			continue
+		}
+
+		lines = append(lines, line)
+	}
+
+	if err := scanner.Err(); err != nil {
+		return nil, fmt.Errorf("failed to read logs: %w", err)
+	}
+
+	// Apply tail option if specified
+	if opts.Tail > 0 && len(lines) > opts.Tail {
+		lines = lines[len(lines)-opts.Tail:]
+	}
+
+	return strings.NewReader(strings.Join(lines, "\n") + "\n"), nil
+}
+
+// logReader implements io.ReadCloser for log following
+type logReader struct {
+	cmd    *exec.Cmd
+	stdout io.ReadCloser
+	file   io.ReadCloser
+}
+
+func (r *logReader) Read(p []byte) (n int, err error) {
+	return r.stdout.Read(p)
+}
+
+func (r *logReader) Close() error {
+	r.file.Close()
+	if err := r.cmd.Process.Kill(); err != nil {
+		return fmt.Errorf("failed to kill log process: %w", err)
+	}
+	return r.cmd.Wait()
 }

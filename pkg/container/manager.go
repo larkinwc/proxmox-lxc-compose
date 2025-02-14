@@ -57,18 +57,38 @@ func NewLXCManager(configPath string) (*LXCManager, error) {
 	}, nil
 }
 
+func (m *LXCManager) execLXCCommand(name string, args ...string) error {
+	cmd := execCommand(name, args...)
+	output, err := cmd.CombinedOutput()
+	if err != nil {
+		if len(output) > 0 {
+			return fmt.Errorf("%s", output)
+		}
+		return err
+	}
+	return nil
+}
+
 // ContainerExists checks if a container exists
 func (m *LXCManager) ContainerExists(name string) bool {
-	// First check if the container exists in the state manager
-	_, err := m.state.GetContainerState(name)
-	if err == nil {
+	// Check if the container exists in our state
+	if _, err := m.state.GetContainerState(name); err == nil {
 		return true
 	}
 
-	// Then check if the container directory exists
+	// Check if the container directory exists
 	containerPath := filepath.Join(m.configPath, name)
-	_, err = os.Stat(containerPath)
-	return err == nil
+	if _, err := os.Stat(containerPath); err == nil {
+		return true
+	}
+
+	// Finally, check if the container exists in LXC
+	cmd := exec.Command("lxc-info", "-n", name)
+	if err := cmd.Run(); err == nil {
+		return true
+	}
+
+	return false
 }
 
 // Create implements Manager.Create
@@ -102,6 +122,10 @@ func (m *LXCManager) Start(name string) error {
 		return fmt.Errorf("container '%s' is already running", name)
 	}
 
+	if container.State != "STOPPED" {
+		return fmt.Errorf("container '%s' is not in a valid state for starting (current state: %s)", name, container.State)
+	}
+
 	// Start the container
 	cmd := exec.Command("lxc-start", "-n", name)
 	if err := cmd.Run(); err != nil {
@@ -119,7 +143,7 @@ func (m *LXCManager) Start(name string) error {
 	}
 
 	// Update state
-	if err := m.state.SaveContainerState(name, nil, "RUNNING"); err != nil {
+	if err := m.state.SaveContainerState(name, container.Config, "RUNNING"); err != nil {
 		return fmt.Errorf("failed to update container state: %w", err)
 	}
 
@@ -135,6 +159,10 @@ func (m *LXCManager) Stop(name string) error {
 
 	if container.State == "STOPPED" {
 		return fmt.Errorf("container '%s' is already stopped", name)
+	}
+
+	if container.State != "RUNNING" && container.State != "FROZEN" {
+		return fmt.Errorf("container '%s' is not in a valid state for stopping (current state: %s)", name, container.State)
 	}
 
 	// Stop the container
@@ -154,7 +182,7 @@ func (m *LXCManager) Stop(name string) error {
 	}
 
 	// Update state
-	if err := m.state.SaveContainerState(name, nil, "STOPPED"); err != nil {
+	if err := m.state.SaveContainerState(name, container.Config, "STOPPED"); err != nil {
 		return fmt.Errorf("failed to update container state: %w", err)
 	}
 
@@ -216,55 +244,41 @@ func (m *LXCManager) Get(name string) (*Container, error) {
 		return nil, fmt.Errorf("container %s does not exist", name)
 	}
 
-	// Get container config from state manager first
-	stateInfo, err := m.state.GetContainerState(name)
+	// First check if we have state info
+	state, err := m.state.GetContainerState(name)
 	if err != nil {
-		return nil, fmt.Errorf("failed to get container state: %w", err)
+		// Create default state if none exists
+		state = &State{
+			Name:   name,
+			Status: "STOPPED",
+		}
 	}
 
 	// Get container state from lxc-info
-	cmd := exec.Command("lxc-info", "-n", name)
+	cmd := execCommand("lxc-info", "-n", name)
 	output, err := cmd.CombinedOutput()
-	if err != nil {
-		if exitErr, ok := err.(*exec.ExitError); ok {
-			switch exitErr.ExitCode() {
-			case 2:
-				return nil, fmt.Errorf("container '%s' does not exist", name)
-			default:
-				// If lxc-info fails but we have state info, use that
-				return &Container{
-					Name:   name,
-					State:  stateInfo.Status,
-					Config: stateInfo.Config,
-				}, nil
+	if err == nil {
+		// Parse lxc-info output to get state
+		for _, line := range strings.Split(string(output), "\n") {
+			if strings.HasPrefix(line, "State:") {
+				lxcState := strings.TrimSpace(strings.TrimPrefix(line, "State:"))
+				switch strings.ToUpper(lxcState) {
+				case "RUNNING":
+					state.Status = "RUNNING"
+				case "STOPPED":
+					state.Status = "STOPPED"
+				case "FROZEN":
+					state.Status = "FROZEN"
+				}
+				break
 			}
 		}
-		// If lxc-info fails but we have state info, use that
-		return &Container{
-			Name:   name,
-			State:  stateInfo.Status,
-			Config: stateInfo.Config,
-		}, nil
-	}
-
-	// Parse lxc-info output to get state
-	var state string
-	for _, line := range strings.Split(string(output), "\n") {
-		if strings.HasPrefix(line, "State:") {
-			state = strings.TrimSpace(strings.TrimPrefix(line, "State:"))
-			break
-		}
-	}
-
-	// If we got state from lxc-info, use it, otherwise use state from state manager
-	if state == "" {
-		state = stateInfo.Status
 	}
 
 	return &Container{
 		Name:   name,
-		State:  state,
-		Config: stateInfo.Config,
+		State:  state.Status,
+		Config: state.Config,
 	}, nil
 }
 
@@ -275,28 +289,21 @@ func (m *LXCManager) Pause(name string) error {
 		return fmt.Errorf("failed to get container: %w", err)
 	}
 
+	if container.State == "FROZEN" {
+		return fmt.Errorf("container '%s' is already frozen", name)
+	}
+
 	if container.State != "RUNNING" {
-		return fmt.Errorf("container '%s' is not running (current state: %s)", name, container.State)
+		return fmt.Errorf("container '%s' is not in a valid state for pausing (current state: %s)", name, container.State)
 	}
 
 	// Freeze the container
-	cmd := exec.Command("lxc-freeze", "-n", name)
-	if err := cmd.Run(); err != nil {
-		if exitErr, ok := err.(*exec.ExitError); ok {
-			switch exitErr.ExitCode() {
-			case 1:
-				return fmt.Errorf("container '%s' is not in a valid state for pausing", name)
-			case 2:
-				return fmt.Errorf("container '%s' does not exist", name)
-			default:
-				return fmt.Errorf("failed to pause container: %w", err)
-			}
-		}
+	if err := m.execLXCCommand("lxc-freeze", "-n", name); err != nil {
 		return fmt.Errorf("failed to pause container: %w", err)
 	}
 
 	// Update state
-	if err := m.state.SaveContainerState(name, nil, "FROZEN"); err != nil {
+	if err := m.state.SaveContainerState(name, container.Config, "FROZEN"); err != nil {
 		return fmt.Errorf("failed to update container state: %w", err)
 	}
 
@@ -310,28 +317,21 @@ func (m *LXCManager) Resume(name string) error {
 		return fmt.Errorf("failed to get container: %w", err)
 	}
 
+	if container.State == "RUNNING" {
+		return fmt.Errorf("container '%s' is already running", name)
+	}
+
 	if container.State != "FROZEN" {
-		return fmt.Errorf("container '%s' is not paused (current state: %s)", name, container.State)
+		return fmt.Errorf("container '%s' is not in a valid state for resuming (current state: %s)", name, container.State)
 	}
 
 	// Unfreeze the container
-	cmd := exec.Command("lxc-unfreeze", "-n", name)
-	if err := cmd.Run(); err != nil {
-		if exitErr, ok := err.(*exec.ExitError); ok {
-			switch exitErr.ExitCode() {
-			case 1:
-				return fmt.Errorf("container '%s' is not in a valid state for resuming", name)
-			case 2:
-				return fmt.Errorf("container '%s' does not exist", name)
-			default:
-				return fmt.Errorf("failed to resume container: %w", err)
-			}
-		}
+	if err := m.execLXCCommand("lxc-unfreeze", "-n", name); err != nil {
 		return fmt.Errorf("failed to resume container: %w", err)
 	}
 
 	// Update state
-	if err := m.state.SaveContainerState(name, nil, "RUNNING"); err != nil {
+	if err := m.state.SaveContainerState(name, container.Config, "RUNNING"); err != nil {
 		return fmt.Errorf("failed to update container state: %w", err)
 	}
 
@@ -345,14 +345,32 @@ func (m *LXCManager) Restart(name string) error {
 		return fmt.Errorf("failed to get container: %w", err)
 	}
 
-	if container.State == "RUNNING" {
-		if err := m.Stop(name); err != nil {
+	// If container is running or frozen, stop it first
+	if container.State == "RUNNING" || container.State == "FROZEN" {
+		if err := m.execLXCCommand("lxc-stop", "-n", name); err != nil {
 			return fmt.Errorf("failed to stop container: %w", err)
+		}
+
+		// Update state to STOPPED
+		if err := m.state.SaveContainerState(name, container.Config, "STOPPED"); err != nil {
+			return fmt.Errorf("failed to update container state: %w", err)
+		}
+
+		// Verify state update
+		container, err = m.Get(name)
+		if err != nil {
+			return fmt.Errorf("failed to get container state: %w", err)
 		}
 	}
 
-	if err := m.Start(name); err != nil {
+	// Start the container
+	if err := m.execLXCCommand("lxc-start", "-n", name); err != nil {
 		return fmt.Errorf("failed to start container: %w", err)
+	}
+
+	// Update state to RUNNING
+	if err := m.state.SaveContainerState(name, container.Config, "RUNNING"); err != nil {
+		return fmt.Errorf("failed to update container state: %w", err)
 	}
 
 	return nil
@@ -365,23 +383,9 @@ func (m *LXCManager) Update(name string, cfg *config.Container) error {
 		return fmt.Errorf("failed to get container: %w", err)
 	}
 
-	// Container must be stopped to update configuration
-	if container.State != "STOPPED" {
-		if err := m.Stop(name); err != nil {
-			return fmt.Errorf("failed to stop container: %w", err)
-		}
-	}
-
-	// Update configuration
-	if err := m.state.SaveContainerState(name, cfg, "STOPPED"); err != nil {
+	// Save new configuration
+	if err := m.state.SaveContainerState(name, cfg, container.State); err != nil {
 		return fmt.Errorf("failed to update container configuration: %w", err)
-	}
-
-	// If container was running before, start it again
-	if container.State == "RUNNING" {
-		if err := m.Start(name); err != nil {
-			return fmt.Errorf("failed to start container: %w", err)
-		}
 	}
 
 	return nil

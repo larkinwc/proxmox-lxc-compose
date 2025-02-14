@@ -1,6 +1,10 @@
 package config
 
-import "testing"
+import (
+	"testing"
+
+	. "proxmox-lxc-compose/pkg/internal/testing"
+)
 
 func TestDefaultStorageConfig(t *testing.T) {
 	tests := []struct {
@@ -52,18 +56,10 @@ func TestDefaultStorageConfig(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			result := tt.input.DefaultStorageConfig()
-			if result.Root != tt.expected.Root {
-				t.Errorf("Root size mismatch: got %v, want %v", result.Root, tt.expected.Root)
-			}
-			if result.Backend != tt.expected.Backend {
-				t.Errorf("Backend mismatch: got %v, want %v", result.Backend, tt.expected.Backend)
-			}
-			if result.AutoMount != tt.expected.AutoMount {
-				t.Errorf("AutoMount mismatch: got %v, want %v", result.AutoMount, tt.expected.AutoMount)
-			}
-			if result.Pool != tt.expected.Pool {
-				t.Errorf("Pool mismatch: got %v, want %v", result.Pool, tt.expected.Pool)
-			}
+			AssertEqual(t, tt.expected.Root, result.Root)
+			AssertEqual(t, tt.expected.Backend, result.Backend)
+			AssertEqual(t, tt.expected.AutoMount, result.AutoMount)
+			AssertEqual(t, tt.expected.Pool, result.Pool)
 		})
 	}
 }

@@ -1,4 +1,5 @@
-package testutil
+// Package mock provides mocking functionality for testing
+package mock
 
 import (
 	"encoding/json"
@@ -6,9 +7,10 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
-	"proxmox-lxc-compose/pkg/config"
 	"strings"
 	"time"
+
+	"proxmox-lxc-compose/pkg/config"
 )
 
 // MockCommandState tracks the state of mock commands
@@ -24,29 +26,6 @@ type MockCommandState struct {
 	}
 }
 
-// CommandWasCalled checks if a command was called with the given name and arguments
-func (m *MockCommandState) CommandWasCalled(name string, args ...string) bool {
-	for _, cmd := range m.commandHistory {
-		if cmd.name != name {
-			continue
-		}
-		if len(cmd.args) != len(args) {
-			continue
-		}
-		match := true
-		for i, arg := range args {
-			if cmd.args[i] != arg {
-				match = false
-				break
-			}
-		}
-		if match {
-			return true
-		}
-	}
-	return false
-}
-
 // SetupMockCommand sets up command mocking and returns a cleanup function
 func SetupMockCommand(execCommand *func(string, ...string) *exec.Cmd) (*MockCommandState, func()) {
 	mock := &MockCommandState{
@@ -58,6 +37,7 @@ func SetupMockCommand(execCommand *func(string, ...string) *exec.Cmd) (*MockComm
 			args []string
 		}, 0),
 	}
+
 	oldExec := *execCommand
 
 	*execCommand = func(name string, args ...string) *exec.Cmd {
@@ -84,15 +64,11 @@ func SetupMockCommand(execCommand *func(string, ...string) *exec.Cmd) (*MockComm
 
 		containerName := args[1]
 		if containerName == "nonexistent" {
-			if mock.debug {
-				fmt.Printf("DEBUG: Nonexistent container: %s\n", containerName)
-			}
 			return exec.Command("sh", "-c", fmt.Sprintf("echo 'Container does not exist' >&2; exit 2"))
 		}
 
 		state, exists := mock.ContainerStates[containerName]
 		if !exists {
-			// Check if container directory exists in configPath
 			if configPath, ok := os.LookupEnv("CONTAINER_CONFIG_PATH"); ok {
 				containerPath := filepath.Join(configPath, containerName)
 				if _, err := os.Stat(containerPath); err == nil {
@@ -104,9 +80,6 @@ func SetupMockCommand(execCommand *func(string, ...string) *exec.Cmd) (*MockComm
 		}
 
 		if !exists {
-			if mock.debug {
-				fmt.Printf("DEBUG: Container not found: %s\n", containerName)
-			}
 			return exec.Command("sh", "-c", fmt.Sprintf("echo 'Container does not exist' >&2; exit 2"))
 		}
 
@@ -115,64 +88,54 @@ func SetupMockCommand(execCommand *func(string, ...string) *exec.Cmd) (*MockComm
 		}
 
 		switch name {
+		case "lxc-info":
+			return exec.Command("sh", "-c", fmt.Sprintf("echo 'State: %s'", state))
 		case "lxc-freeze":
 			if strings.ToUpper(state) != "RUNNING" {
-				if mock.debug {
-					fmt.Printf("DEBUG: Cannot freeze non-running container (state: %s)\n", state)
-				}
 				return exec.Command("sh", "-c", fmt.Sprintf("echo 'Container is not in a valid state for pausing (current state: %s)' >&2; exit 1", state))
 			}
-			mock.ContainerStates[containerName] = "FROZEN"
 			if err := mock.SetContainerState(containerName, "FROZEN"); err != nil {
-				if mock.debug {
-					fmt.Printf("DEBUG: Failed to update state: %v\n", err)
-				}
 				return exec.Command("sh", "-c", fmt.Sprintf("echo 'Failed to update state: %v' >&2; exit 1", err))
 			}
+			return exec.Command("sh", "-c", "true")
 
 		case "lxc-unfreeze":
 			if strings.ToUpper(state) != "FROZEN" {
-				if mock.debug {
-					fmt.Printf("DEBUG: Cannot unfreeze non-frozen container (state: %s)\n", state)
-				}
 				return exec.Command("sh", "-c", fmt.Sprintf("echo 'Container is not in a valid state for resuming (current state: %s)' >&2; exit 1", state))
 			}
-			mock.ContainerStates[containerName] = "RUNNING"
 			if err := mock.SetContainerState(containerName, "RUNNING"); err != nil {
-				if mock.debug {
-					fmt.Printf("DEBUG: Failed to update state: %v\n", err)
-				}
 				return exec.Command("sh", "-c", fmt.Sprintf("echo 'Failed to update state: %v' >&2; exit 1", err))
 			}
+			return exec.Command("sh", "-c", "true")
 
 		case "lxc-start":
 			if strings.ToUpper(state) != "STOPPED" {
-				if mock.debug {
-					fmt.Printf("DEBUG: Cannot start non-stopped container (state: %s)\n", state)
-				}
 				return exec.Command("sh", "-c", fmt.Sprintf("echo 'Container is not in a valid state for starting (current state: %s)' >&2; exit 1", state))
 			}
-			mock.ContainerStates[containerName] = "RUNNING"
 			if err := mock.SetContainerState(containerName, "RUNNING"); err != nil {
-				if mock.debug {
-					fmt.Printf("DEBUG: Failed to update state: %v\n", err)
-				}
 				return exec.Command("sh", "-c", fmt.Sprintf("echo 'Failed to update state: %v' >&2; exit 1", err))
 			}
+			return exec.Command("sh", "-c", "true")
 
 		case "lxc-stop":
 			if strings.ToUpper(state) != "RUNNING" && strings.ToUpper(state) != "FROZEN" {
-				if mock.debug {
-					fmt.Printf("DEBUG: Cannot stop non-running/frozen container (state: %s)\n", state)
-				}
 				return exec.Command("sh", "-c", fmt.Sprintf("echo 'Container is not in a valid state for stopping (current state: %s)' >&2; exit 1", state))
 			}
-			mock.ContainerStates[containerName] = "STOPPED"
 			if err := mock.SetContainerState(containerName, "STOPPED"); err != nil {
-				if mock.debug {
-					fmt.Printf("DEBUG: Failed to update state: %v\n", err)
-				}
 				return exec.Command("sh", "-c", fmt.Sprintf("echo 'Failed to update state: %v' >&2; exit 1", err))
+			}
+			return exec.Command("sh", "-c", "true")
+
+		case "lxc-attach":
+			if strings.Contains(strings.Join(args, " "), "tail -f") {
+				// Mock streaming log output
+				return exec.Command("sh", "-c", `
+					echo "2025-02-13 17:02:36.123 Container started"
+					echo "2025-02-13 17:02:37.456 Service initialized"
+					sleep 0.1
+					echo "2025-02-13 17:02:38.789 Ready to accept connections"
+					sleep 0.1
+				`)
 			}
 		}
 
@@ -184,11 +147,7 @@ func SetupMockCommand(execCommand *func(string, ...string) *exec.Cmd) (*MockComm
 		if mock.debug {
 			fmt.Printf("DEBUG: Cleaning up %d temporary files\n", len(mock.tmpFiles))
 		}
-		// Clean up all temporary files
 		for _, file := range mock.tmpFiles {
-			if mock.debug {
-				fmt.Printf("DEBUG: Removing temporary file: %s\n", file)
-			}
 			os.Remove(file)
 		}
 		*execCommand = oldExec
@@ -208,72 +167,82 @@ func (m *MockCommandState) SetContainerState(containerName, state string) error 
 
 	// Update in-memory state
 	m.ContainerStates[containerName] = strings.ToUpper(state)
-	if m.debug {
-		fmt.Printf("DEBUG: Updated container states: %v\n", m.ContainerStates)
-	}
 
 	// Update state file
 	if configPath, ok := os.LookupEnv("CONTAINER_CONFIG_PATH"); ok {
-		if m.debug {
-			fmt.Printf("DEBUG: Found config path: %s\n", configPath)
-		}
-
-		// Create container directory if it doesn't exist
 		containerPath := filepath.Join(configPath, containerName)
 		if err := os.MkdirAll(containerPath, 0755); err != nil {
-			if m.debug {
-				fmt.Printf("DEBUG: Failed to create container directory: %v\n", err)
-			}
 			return err
 		}
 
-		// Create state directory if it doesn't exist
 		statePath := filepath.Join(configPath, "state")
 		if err := os.MkdirAll(statePath, 0755); err != nil {
-			if m.debug {
-				fmt.Printf("DEBUG: Failed to create state directory: %v\n", err)
-			}
 			return err
 		}
 
-		// Create state file
 		stateFilePath := filepath.Join(statePath, containerName+".json")
-		stateData := struct {
+
+		// Try to read existing state file
+		var stateData struct {
 			Name          string            `json:"name"`
-			CreatedAt     string            `json:"created_at"`
-			LastStartedAt string            `json:"last_started_at,omitempty"`
-			LastStoppedAt string            `json:"last_stopped_at,omitempty"`
+			CreatedAt     time.Time         `json:"created_at"`
+			LastStartedAt *time.Time        `json:"last_started_at,omitempty"`
+			LastStoppedAt *time.Time        `json:"last_stopped_at,omitempty"`
 			Config        *config.Container `json:"config"`
 			Status        string            `json:"status"`
-		}{
-			Name:      containerName,
-			CreatedAt: time.Now().Format(time.RFC3339),
-			Status:    strings.ToUpper(state),
-			Config:    &config.Container{},
+		}
+
+		if data, err := os.ReadFile(stateFilePath); err == nil {
+			if err := json.Unmarshal(data, &stateData); err == nil {
+				// Preserve existing data but update status
+				stateData.Status = strings.ToUpper(state)
+				now := time.Now()
+				switch strings.ToUpper(state) {
+				case "RUNNING":
+					stateData.LastStartedAt = &now
+				case "STOPPED":
+					stateData.LastStoppedAt = &now
+				}
+			}
+		}
+
+		// If no existing state or unmarshal failed, create new state
+		if stateData.Name == "" {
+			now := time.Now()
+			stateData = struct {
+				Name          string            `json:"name"`
+				CreatedAt     time.Time         `json:"created_at"`
+				LastStartedAt *time.Time        `json:"last_started_at,omitempty"`
+				LastStoppedAt *time.Time        `json:"last_stopped_at,omitempty"`
+				Config        *config.Container `json:"config"`
+				Status        string            `json:"status"`
+			}{
+				Name:      containerName,
+				CreatedAt: now,
+				Status:    strings.ToUpper(state),
+				Config:    &config.Container{},
+			}
+
+			switch strings.ToUpper(state) {
+			case "RUNNING":
+				stateData.LastStartedAt = &now
+			case "STOPPED":
+				stateData.LastStoppedAt = &now
+			}
 		}
 
 		data, err := json.MarshalIndent(stateData, "", "  ")
 		if err != nil {
-			if m.debug {
-				fmt.Printf("DEBUG: Failed to marshal state data: %v\n", err)
-			}
 			return err
 		}
 
-		// Write state file
 		if err := os.WriteFile(stateFilePath, data, 0644); err != nil {
-			if m.debug {
-				fmt.Printf("DEBUG: Failed to write state file: %v\n", err)
-			}
 			return err
 		}
+	}
 
-		if m.debug {
-			fmt.Printf("DEBUG: Successfully wrote state file: %s\n", stateFilePath)
-			fmt.Printf("DEBUG: State file contents: %s\n", string(data))
-		}
-	} else if m.debug {
-		fmt.Printf("DEBUG: CONTAINER_CONFIG_PATH not set\n")
+	if m.debug {
+		fmt.Printf("DEBUG: State updated successfully to %s\n", state)
 	}
 
 	return nil
@@ -292,86 +261,23 @@ func (m *MockCommandState) AddContainer(containerName, state string) {
 		if err := os.MkdirAll(containerPath, 0755); err != nil {
 			if m.debug {
 				fmt.Printf("DEBUG: Failed to create container directory: %v\n", err)
-				return
 			}
+			return
 		}
 
-		// Create state directory if it doesn't exist
-		statePath := filepath.Join(configPath, "state")
-		if err := os.MkdirAll(statePath, 0755); err != nil {
+		// Create empty config.yaml file
+		configFile := filepath.Join(containerPath, "config.yaml")
+		if err := os.WriteFile(configFile, []byte{}, 0644); err != nil {
 			if m.debug {
-				fmt.Printf("DEBUG: Failed to create state directory: %v\n", err)
-				return
+				fmt.Printf("DEBUG: Failed to create config file: %v\n", err)
 			}
 		}
 
 		// Create or update state file
-		stateData := struct {
-			Name          string            `json:"name"`
-			CreatedAt     string            `json:"created_at"`
-			LastStartedAt string            `json:"last_started_at,omitempty"`
-			LastStoppedAt string            `json:"last_stopped_at,omitempty"`
-			Config        *config.Container `json:"config"`
-			Status        string            `json:"status"`
-		}{
-			Name:      containerName,
-			CreatedAt: time.Now().Format(time.RFC3339),
-			Status:    strings.ToUpper(state),
-			Config:    &config.Container{},
-		}
-
-		// Update timestamps based on state
-		now := time.Now().Format(time.RFC3339)
-		if strings.ToUpper(state) == "RUNNING" {
-			stateData.LastStartedAt = now
-		} else if strings.ToUpper(state) == "STOPPED" {
-			stateData.LastStoppedAt = now
-		}
-
-		data, err := json.MarshalIndent(stateData, "", "  ")
-		if err != nil {
+		if err := m.SetContainerState(containerName, state); err != nil {
 			if m.debug {
-				fmt.Printf("DEBUG: Failed to marshal state data: %v\n", err)
+				fmt.Printf("DEBUG: Failed to set container state: %v\n", err)
 			}
-			return
-		}
-
-		stateFile := filepath.Join(statePath, containerName+".json")
-		if err := os.WriteFile(stateFile, data, 0644); err != nil {
-			if m.debug {
-				fmt.Printf("DEBUG: Failed to write state file: %v\n", err)
-			}
-			return
-		}
-
-		if m.debug {
-			fmt.Printf("DEBUG: Successfully wrote state file: %s\n", stateFile)
 		}
 	}
-}
-
-// SetDebug enables or disables debug logging
-func (m *MockCommandState) SetDebug(enabled bool) {
-	m.debug = enabled
-}
-
-// GetContainerState returns the state of a container
-func (m *MockCommandState) GetContainerState(containerName string) (string, bool) {
-	state, exists := m.ContainerStates[containerName]
-	return state, exists
-}
-
-// RemoveContainer removes a container from the mock state
-func (m *MockCommandState) RemoveContainer(containerName string) {
-	delete(m.ContainerStates, containerName)
-}
-
-// ContainerExists checks if a container exists in the mock state
-func (m *MockCommandState) ContainerExists(containerName string) bool {
-	if containerName == "nonexistent" {
-		return false
-	}
-
-	_, exists := m.ContainerStates[containerName]
-	return exists
 }

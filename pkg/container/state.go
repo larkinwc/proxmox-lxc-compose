@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync"
 	"time"
 
@@ -24,8 +25,8 @@ type State struct {
 // StateManager handles container state persistence
 type StateManager struct {
 	statePath string
-	mu        sync.RWMutex
 	states    map[string]*State
+	mu        sync.RWMutex
 }
 
 // NewStateManager creates a new state manager
@@ -39,9 +40,8 @@ func NewStateManager(statePath string) (*StateManager, error) {
 		states:    make(map[string]*State),
 	}
 
-	// Load existing states
 	if err := sm.loadStates(); err != nil {
-		return nil, err
+		return nil, fmt.Errorf("failed to load states: %w", err)
 	}
 
 	return sm, nil
@@ -52,31 +52,31 @@ func (sm *StateManager) SaveContainerState(name string, cfg *config.Container, s
 	sm.mu.Lock()
 	defer sm.mu.Unlock()
 
-	state, exists := sm.states[name]
-	if !exists {
-		state = &State{
-			Name:      name,
-			CreatedAt: time.Now(),
-			Config:    cfg,
+	state := &State{
+		Name:      name,
+		Config:    cfg,
+		Status:    status,
+		CreatedAt: time.Now(),
+	}
+
+	if existing, ok := sm.states[name]; ok {
+		state.CreatedAt = existing.CreatedAt
+		if status == "RUNNING" && (existing.Status == "STOPPED" || existing.Status == "FROZEN") {
+			state.LastStartedAt = &time.Time{}
+			*state.LastStartedAt = time.Now()
+		} else if status == "STOPPED" && existing.Status == "RUNNING" {
+			state.LastStoppedAt = &time.Time{}
+			*state.LastStoppedAt = time.Now()
 		}
-		sm.states[name] = state
 	}
 
-	now := time.Now()
-	if status == "RUNNING" {
-		state.LastStartedAt = &now
-	} else if status == "STOPPED" {
-		state.LastStoppedAt = &now
+	sm.states[name] = state
+
+	if err := sm.saveState(name, state); err != nil {
+		return fmt.Errorf("failed to save state: %w", err)
 	}
 
-	// Update config if provided
-	if cfg != nil {
-		state.Config = cfg
-	}
-
-	state.Status = status
-
-	return sm.saveState(name, state)
+	return nil
 }
 
 // GetContainerState retrieves the state of a container
@@ -84,9 +84,9 @@ func (sm *StateManager) GetContainerState(name string) (*State, error) {
 	sm.mu.RLock()
 	defer sm.mu.RUnlock()
 
-	state, exists := sm.states[name]
-	if !exists {
-		return nil, fmt.Errorf("no state found for container %s", name)
+	state, ok := sm.states[name]
+	if !ok {
+		return nil, fmt.Errorf("container %s does not exist", name)
 	}
 
 	return state, nil
@@ -97,26 +97,39 @@ func (sm *StateManager) RemoveContainerState(name string) error {
 	sm.mu.Lock()
 	defer sm.mu.Unlock()
 
+	if _, ok := sm.states[name]; !ok {
+		return fmt.Errorf("container %s does not exist", name)
+	}
+
 	delete(sm.states, name)
-	return os.Remove(sm.getStatePath(name))
+
+	stateFile := sm.getStatePath(name)
+	if err := os.Remove(stateFile); err != nil && !os.IsNotExist(err) {
+		return fmt.Errorf("failed to remove state file: %w", err)
+	}
+
+	return nil
 }
 
 // loadStates loads all container states from disk
 func (sm *StateManager) loadStates() error {
-	files, err := os.ReadDir(sm.statePath)
-	if err != nil {
+	sm.mu.Lock()
+	defer sm.mu.Unlock()
+
+	entries, err := os.ReadDir(sm.statePath)
+	if err != nil && !os.IsNotExist(err) {
 		return fmt.Errorf("failed to read state directory: %w", err)
 	}
 
-	for _, file := range files {
-		if file.IsDir() || filepath.Ext(file.Name()) != ".json" {
+	for _, entry := range entries {
+		if entry.IsDir() || !strings.HasSuffix(entry.Name(), ".json") {
 			continue
 		}
 
-		name := file.Name()[:len(file.Name())-5] // remove .json extension
+		name := strings.TrimSuffix(entry.Name(), ".json")
 		state, err := sm.loadState(name)
 		if err != nil {
-			return err
+			continue // Skip invalid state files
 		}
 
 		sm.states[name] = state
@@ -134,7 +147,7 @@ func (sm *StateManager) loadState(name string) (*State, error) {
 
 	var state State
 	if err := json.Unmarshal(data, &state); err != nil {
-		return nil, fmt.Errorf("failed to parse state file: %w", err)
+		return nil, fmt.Errorf("failed to unmarshal state: %w", err)
 	}
 
 	return &state, nil

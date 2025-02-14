@@ -6,18 +6,18 @@ import (
 	"testing"
 
 	"proxmox-lxc-compose/pkg/config"
-	"proxmox-lxc-compose/pkg/testutil"
+	. "proxmox-lxc-compose/pkg/internal/testing"
 )
 
 func TestConfigureNetwork(t *testing.T) {
-	dir, cleanup := testutil.TempDir(t)
+	dir, cleanup := TempDir(t)
 	defer cleanup()
 
 	// Create test container directory
 	containerName := "test-container"
 	containerDir := filepath.Join(dir, containerName)
 	err := os.MkdirAll(containerDir, 0755)
-	testutil.AssertNoError(t, err)
+	AssertNoError(t, err)
 
 	// Create manager
 	manager := &LXCManager{
@@ -43,18 +43,18 @@ func TestConfigureNetwork(t *testing.T) {
 			},
 			verify: func(t *testing.T, configPath string) {
 				data, err := os.ReadFile(configPath)
-				testutil.AssertNoError(t, err)
+				AssertNoError(t, err)
 				content := string(data)
 
 				// Verify DHCP settings
-				testutil.AssertContains(t, content, "lxc.net.0.type = bridge")
-				testutil.AssertContains(t, content, "lxc.net.0.link = br0")
-				testutil.AssertContains(t, content, "lxc.net.0.name = eth0")
-				testutil.AssertContains(t, content, "lxc.net.0.ipv4.method = dhcp")
-				testutil.AssertContains(t, content, "lxc.net.0.ipv6.method = dhcp")
-				testutil.AssertContains(t, content, "lxc.net.0.hostname = test-host")
-				testutil.AssertContains(t, content, "lxc.net.0.mtu = 1500")
-				testutil.AssertContains(t, content, "lxc.net.0.hwaddr = 00:11:22:33:44:55")
+				AssertContains(t, content, "lxc.net.0.type = bridge")
+				AssertContains(t, content, "lxc.net.0.link = br0")
+				AssertContains(t, content, "lxc.net.0.name = eth0")
+				AssertContains(t, content, "lxc.net.0.ipv4.method = dhcp")
+				AssertContains(t, content, "lxc.net.0.ipv6.method = dhcp")
+				AssertContains(t, content, "lxc.net.0.hostname = test-host")
+				AssertContains(t, content, "lxc.net.0.mtu = 1500")
+				AssertContains(t, content, "lxc.net.0.hwaddr = 00:11:22:33:44:55")
 			},
 		},
 		{
@@ -72,20 +72,20 @@ func TestConfigureNetwork(t *testing.T) {
 			},
 			verify: func(t *testing.T, configPath string) {
 				data, err := os.ReadFile(configPath)
-				testutil.AssertNoError(t, err)
+				AssertNoError(t, err)
 				content := string(data)
 
 				// Verify static IP settings
-				testutil.AssertContains(t, content, "lxc.net.0.type = bridge")
-				testutil.AssertContains(t, content, "lxc.net.0.link = br0")
-				testutil.AssertContains(t, content, "lxc.net.0.name = eth0")
-				testutil.AssertContains(t, content, "lxc.net.0.ipv4.address = 192.168.1.100/24")
-				testutil.AssertContains(t, content, "lxc.net.0.ipv4.gateway = 192.168.1.1")
-				testutil.AssertContains(t, content, "lxc.net.0.ipv4.nameserver.0 = 8.8.8.8")
-				testutil.AssertContains(t, content, "lxc.net.0.ipv4.nameserver.1 = 8.8.4.4")
-				testutil.AssertContains(t, content, "lxc.net.0.hostname = test-host")
-				testutil.AssertContains(t, content, "lxc.net.0.mtu = 1500")
-				testutil.AssertContains(t, content, "lxc.net.0.hwaddr = 00:11:22:33:44:55")
+				AssertContains(t, content, "lxc.net.0.type = bridge")
+				AssertContains(t, content, "lxc.net.0.link = br0")
+				AssertContains(t, content, "lxc.net.0.name = eth0")
+				AssertContains(t, content, "lxc.net.0.ipv4.address = 192.168.1.100/24")
+				AssertContains(t, content, "lxc.net.0.ipv4.gateway = 192.168.1.1")
+				AssertContains(t, content, "lxc.net.0.ipv4.nameserver.0 = 8.8.8.8")
+				AssertContains(t, content, "lxc.net.0.ipv4.nameserver.1 = 8.8.4.4")
+				AssertContains(t, content, "lxc.net.0.hostname = test-host")
+				AssertContains(t, content, "lxc.net.0.mtu = 1500")
+				AssertContains(t, content, "lxc.net.0.hwaddr = 00:11:22:33:44:55")
 			},
 		},
 		{
@@ -107,10 +107,10 @@ func TestConfigureNetwork(t *testing.T) {
 
 			err := manager.configureNetwork(containerName, tt.config)
 			if tt.wantErr {
-				testutil.AssertError(t, err)
+				AssertError(t, err)
 				return
 			}
-			testutil.AssertNoError(t, err)
+			AssertNoError(t, err)
 
 			if tt.verify != nil {
 				tt.verify(t, configPath)
@@ -120,14 +120,14 @@ func TestConfigureNetwork(t *testing.T) {
 }
 
 func TestGetNetworkConfig(t *testing.T) {
-	dir, cleanup := testutil.TempDir(t)
+	dir, cleanup := TempDir(t)
 	defer cleanup()
 
 	// Create test container directory
 	containerName := "test-container"
 	containerDir := filepath.Join(dir, containerName)
 	err := os.MkdirAll(containerDir, 0755)
-	testutil.AssertNoError(t, err)
+	AssertNoError(t, err)
 
 	// Create manager
 	manager := &LXCManager{
@@ -198,15 +198,15 @@ lxc.net.0.hwaddr = 00:11:22:33:44:55`,
 
 			if tt.content != "" {
 				err := os.WriteFile(configPath, []byte(tt.content), 0644)
-				testutil.AssertNoError(t, err)
+				AssertNoError(t, err)
 			}
 
 			cfg, err := manager.getNetworkConfig(containerName)
 			if tt.wantErr {
-				testutil.AssertError(t, err)
+				AssertError(t, err)
 				return
 			}
-			testutil.AssertNoError(t, err)
+			AssertNoError(t, err)
 
 			if tt.expected == nil {
 				if cfg != nil {
@@ -215,21 +215,21 @@ lxc.net.0.hwaddr = 00:11:22:33:44:55`,
 				return
 			}
 
-			testutil.AssertEqual(t, tt.expected.Type, cfg.Type)
-			testutil.AssertEqual(t, tt.expected.Bridge, cfg.Bridge)
-			testutil.AssertEqual(t, tt.expected.Interface, cfg.Interface)
-			testutil.AssertEqual(t, tt.expected.DHCP, cfg.DHCP)
-			testutil.AssertEqual(t, tt.expected.IP, cfg.IP)
-			testutil.AssertEqual(t, tt.expected.Gateway, cfg.Gateway)
-			testutil.AssertEqual(t, tt.expected.Hostname, cfg.Hostname)
-			testutil.AssertEqual(t, tt.expected.MTU, cfg.MTU)
-			testutil.AssertEqual(t, tt.expected.MAC, cfg.MAC)
+			AssertEqual(t, tt.expected.Type, cfg.Type)
+			AssertEqual(t, tt.expected.Bridge, cfg.Bridge)
+			AssertEqual(t, tt.expected.Interface, cfg.Interface)
+			AssertEqual(t, tt.expected.DHCP, cfg.DHCP)
+			AssertEqual(t, tt.expected.IP, cfg.IP)
+			AssertEqual(t, tt.expected.Gateway, cfg.Gateway)
+			AssertEqual(t, tt.expected.Hostname, cfg.Hostname)
+			AssertEqual(t, tt.expected.MTU, cfg.MTU)
+			AssertEqual(t, tt.expected.MAC, cfg.MAC)
 
 			if len(tt.expected.DNS) != len(cfg.DNS) {
 				t.Errorf("expected %d DNS servers, got %d", len(tt.expected.DNS), len(cfg.DNS))
 			} else {
 				for i, dns := range tt.expected.DNS {
-					testutil.AssertEqual(t, dns, cfg.DNS[i])
+					AssertEqual(t, dns, cfg.DNS[i])
 				}
 			}
 		})
