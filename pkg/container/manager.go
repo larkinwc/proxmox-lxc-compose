@@ -142,6 +142,11 @@ func (m *LXCManager) Create(name string, cfg *common.Container) error {
 		}
 	}
 
+	// Apply container configuration
+	if err := m.applyConfig(name, cfg); err != nil {
+		return fmt.Errorf("failed to apply container configuration: %w", err)
+	}
+
 	// Convert common.Container to config.Container for state saving
 	configContainer := config.FromCommonContainer(cfg)
 
