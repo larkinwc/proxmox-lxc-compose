@@ -114,16 +114,3 @@ func RetryWithBackoff(ctx context.Context, config RetryConfig, op func() error) 
 
 	return lastErr
 }
-
-// Wait waits for the given duration and, if the context is cancelled,
-// returns the context error
-func wait(ctx context.Context, duration time.Duration) error {
-	timer := time.NewTimer(duration)
-	defer timer.Stop()
-	select {
-	case <-ctx.Done():
-		return ctx.Err()
-	case <-timer.C:
-		return nil
-	}
-}

@@ -147,8 +147,8 @@ func (m *LXCManager) configureNetwork(name string, cfg *config.NetworkConfig) er
 	return os.WriteFile(configPath, []byte(strings.Join(lines, "\n")+"\n"), 0644)
 }
 
-// getNetworkConfig reads network configuration from a container's config file
-func (m *LXCManager) getNetworkConfig(name string) (*config.NetworkConfig, error) {
+// GetNetworkConfig reads network configuration from a container's config file
+func (m *LXCManager) GetNetworkConfig(name string) (*config.NetworkConfig, error) {
 	logging.Debug("Reading network configuration", "container", name)
 
 	configPath := filepath.Join(m.configPath, name, "network", "config")

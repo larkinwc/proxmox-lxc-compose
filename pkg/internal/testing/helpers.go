@@ -1,5 +1,5 @@
-// Package testing_internal provides test helper functions
-package testing_internal
+// Package testutil provides test helper functions
+package testutil
 
 import (
 	"os"

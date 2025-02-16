@@ -22,11 +22,10 @@ type cachedImage struct {
 
 // LocalImageStore represents a local OCI image store
 type LocalImageStore struct {
-	rootDir  string
-	cacheTTL time.Duration
-	mu       sync.RWMutex
-	cache    map[string]*cachedImage
-	ttl      int64
+	rootDir string
+	mu      sync.RWMutex
+	cache   map[string]*cachedImage
+	ttl     int64
 }
 
 // NewLocalImageStore creates a new local image store
@@ -290,25 +289,8 @@ func (s *LocalImageStore) CleanExpiredImages() error {
 
 // getImagePath returns the full path for an image
 func (s *LocalImageStore) getImagePath(ref ImageReference) string {
-	filename := strings.Replace(ref.String(), "/", "_", -1) + ".tar"
+	filename := strings.ReplaceAll(ref.String(), "/", "_") + ".tar"
 	return filepath.Join(s.rootDir, filename)
-}
-
-func parseImageFilename(filename string) (ImageReference, error) {
-	// Remove .tar extension
-	name := strings.TrimSuffix(filename, ".tar")
-
-	// Split into parts (previously joined with _)
-	parts := strings.Split(name, "_")
-	if len(parts) < 3 {
-		return ImageReference{}, fmt.Errorf("invalid image filename format")
-	}
-
-	return ImageReference{
-		Registry:   parts[0],
-		Repository: strings.Join(parts[1:len(parts)-1], "/"),
-		Tag:        parts[len(parts)-1],
-	}, nil
 }
 
 func validateReference(ref ImageReference) error {
@@ -318,11 +300,8 @@ func validateReference(ref ImageReference) error {
 	return nil
 }
 
-// SetCacheTTL sets the cache time-to-live in seconds
+// SetCacheTTL sets the cache TTL in seconds
 func (s *LocalImageStore) SetCacheTTL(ttl int) {
-	if s == nil {
-		return
-	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.ttl = int64(ttl)

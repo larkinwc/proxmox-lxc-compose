@@ -1,5 +1,5 @@
-// Package testing_internal provides test utilities for container tests
-package testing_internal
+// Package testutil provides test utilities for container tests
+package testutil
 
 import (
 	"os/exec"

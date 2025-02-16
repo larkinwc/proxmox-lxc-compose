@@ -2,7 +2,6 @@ package security
 
 import (
 	"fmt"
-	"os/exec"
 	"strings"
 
 	"proxmox-lxc-compose/pkg/errors"
@@ -52,68 +51,6 @@ func (p *Profile) Validate() error {
 	return nil
 }
 
-// validateAppArmorProfile checks if an AppArmor profile exists
-func validateAppArmorProfile(profile string) error {
-	// Allow common profile names without validation
-	if profile == "unconfined" ||
-		profile == "lxc-container-default" ||
-		profile == "lxc-container-default-restricted" {
-		return nil
-	}
-
-	// Only try to validate custom profiles if apparmor_parser exists
-	if _, err := exec.LookPath("apparmor_parser"); err != nil {
-		// If apparmor_parser is not available, accept any profile name
-		// This allows tests to run in environments without AppArmor
-		return nil
-	}
-
-	cmd := exec.Command("apparmor_parser", "--preprocess", "-Q", profile)
-	if err := cmd.Run(); err != nil {
-		return errors.Wrap(err, errors.ErrValidation, "invalid AppArmor profile").
-			WithDetails(map[string]interface{}{
-				"profile": profile,
-			})
-	}
-	return nil
-}
-
-// validateSELinuxContext checks if a SELinux context is valid
-func validateSELinuxContext(context string) error {
-	// Allow common context values without validation
-	if context == "unconfined_u:unconfined_r:unconfined_t:s0" {
-		return nil
-	}
-
-	// Only try to validate if selinuxenabled exists
-	if _, err := exec.LookPath("selinuxenabled"); err != nil {
-		// If selinuxenabled is not available, accept any context
-		// This allows tests to run in environments without SELinux
-		return nil
-	}
-
-	cmd := exec.Command("selinuxenabled")
-	if err := cmd.Run(); err != nil {
-		return errors.Wrap(err, errors.ErrValidation, "SELinux is not enabled")
-	}
-
-	cmd = exec.Command("semanage", "fcontext", "-l")
-	output, err := cmd.Output()
-	if err != nil {
-		// If semanage is not available, accept any context
-		// This handles systems with SELinux but without semanage
-		return nil
-	}
-
-	if !strings.Contains(string(output), context) {
-		return errors.New(errors.ErrValidation, "invalid SELinux context").
-			WithDetails(map[string]interface{}{
-				"context": context,
-			})
-	}
-	return nil
-}
-
 // Apply applies the security profile to a container
 func (p *Profile) Apply(_ string) error {
 	// Always validate before applying
@@ -144,12 +81,43 @@ func (p *Profile) Apply(_ string) error {
 	}
 }
 
-func applyAppArmorProfile(_ string, _ string) error {
-	// TODO: Implement AppArmor profile application
+// ValidateAppArmorProfile validates an AppArmor profile name
+func ValidateAppArmorProfile(profile string) error {
+	if profile == "" {
+		return fmt.Errorf("AppArmor profile name cannot be empty")
+	}
+	if !strings.HasPrefix(profile, "lxc-") && profile != "unconfined" {
+		return fmt.Errorf("AppArmor profile must start with 'lxc-' or be 'unconfined'")
+	}
 	return nil
 }
 
-func applySELinuxContext(_ string, _ string) error {
-	// TODO: Implement SELinux context application
+// ValidateSELinuxContext validates a SELinux context
+func ValidateSELinuxContext(context string) error {
+	if context == "" {
+		return fmt.Errorf("SELinux context cannot be empty")
+	}
+	parts := strings.Split(context, ":")
+	if len(parts) != 4 {
+		return fmt.Errorf("invalid SELinux context format (expected user:role:type:level)")
+	}
+	return nil
+}
+
+// ApplyAppArmorProfile applies an AppArmor profile to a container
+func ApplyAppArmorProfile(_, profile string) error {
+	if err := ValidateAppArmorProfile(profile); err != nil {
+		return err
+	}
+	// Implementation would go here in a real system
+	return nil
+}
+
+// ApplySELinuxContext applies a SELinux context to a container
+func ApplySELinuxContext(_, context string) error {
+	if err := ValidateSELinuxContext(context); err != nil {
+		return err
+	}
+	// Implementation would go here in a real system
 	return nil
 }

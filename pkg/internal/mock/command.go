@@ -6,7 +6,6 @@ import (
 	"os/exec"
 	"strings"
 	"sync"
-	"time"
 )
 
 // CommandState tracks the state of mock commands
@@ -20,13 +19,6 @@ type CommandState struct {
 		name string
 		args []string
 	}
-}
-
-type containerState struct {
-	Name          string     `json:"name"`
-	CreatedAt     time.Time  `json:"created_at"`
-	LastStartedAt *time.Time `json:"last_started_at,omitempty"`
-	Status        string     `json:"status"`
 }
 
 // SetDebug enables or disables debug mode
@@ -115,6 +107,21 @@ func (m *CommandState) GetContainerState(containerName string) string {
 	return state
 }
 
+// Command defines the interface for mocking command execution
+type Command interface {
+	Run(name string, args ...string) error
+	Output(name string, args ...string) ([]byte, error)
+	CombinedOutput(name string, args ...string) ([]byte, error)
+	SetDebug(enabled bool)
+	ContainerExists(containerName string) bool
+	SetContainerState(containerName, state string) error
+	RemoveContainer(containerName string) error
+	AddContainer(containerName, state string) error
+	AddMockOutput(command string, output []byte)
+	WasCalled(cmd string) bool
+	Command(cmd string, args ...string) ([]byte, error)
+}
+
 // execLXCCommand handles LXC command execution and state transitions
 func (m *CommandState) execLXCCommand(name string, args ...string) ([]byte, error) {
 	if m.debug {
@@ -128,15 +135,17 @@ func (m *CommandState) execLXCCommand(name string, args ...string) ([]byte, erro
 	}{name, args})
 
 	// Handle lxc-info command
-	if name == "lxc-info" && len(args) >= 2 && args[0] == "-n" {
-		containerName := args[1]
-		if state, exists := m.ContainerStates[containerName]; exists {
-			if m.debug {
-				fmt.Printf("DEBUG: Found container state for %s: %s\n", containerName, state)
+	if name == "lxc-info" {
+		if len(args) >= 2 && args[0] == "-n" {
+			containerName := args[1]
+			if state, exists := m.ContainerStates[containerName]; exists {
+				if m.debug {
+					fmt.Printf("DEBUG: Found container state for %s: %s\n", containerName, state)
+				}
+				return []byte(fmt.Sprintf("Name: %s\nState: %s\n", containerName, state)), nil
 			}
-			return []byte(fmt.Sprintf("Name: %s\nState: %s\n", containerName, state)), nil
+			return []byte("container does not exist\n"), fmt.Errorf("exit status 1")
 		}
-		return []byte("container does not exist\n"), fmt.Errorf("exit status 1")
 	}
 
 	// Handle lxc-destroy command
@@ -175,18 +184,20 @@ func (m *CommandState) execLXCCommand(name string, args ...string) ([]byte, erro
 		return []byte("container does not exist\n"), fmt.Errorf("exit status 1")
 	}
 
+	// Handle lxc-ls command
+	if name == "lxc-ls" {
+		var containers []string
+		for container := range m.ContainerStates {
+			containers = append(containers, container)
+		}
+		return []byte(strings.Join(containers, "\n")), nil
+	}
+
 	return nil, nil
 }
 
-// mockCmd is a custom command type for mocking
-type mockCmd struct {
-	*exec.Cmd
-	runErr error
-	output []byte
-}
-
 // SetupMockCommand sets up a mock command executor
-func SetupMockCommand(execCommand *func(string, ...string) *exec.Cmd) (MockCommand, func()) {
+func SetupMockCommand(execCommand *func(string, ...string) *exec.Cmd) (Command, func()) {
 	mockState := NewCommandState()
 	originalExecCommand := *execCommand
 
@@ -258,21 +269,6 @@ func (m *CommandState) Command(cmd string, args ...string) ([]byte, error) {
 	return []byte{}, nil
 }
 
-// MockCommand represents a mock command executor
-type MockCommand interface {
-	Run(name string, args ...string) error
-	Output(name string, args ...string) ([]byte, error)
-	CombinedOutput(name string, args ...string) ([]byte, error)
-	SetDebug(enabled bool)
-	ContainerExists(containerName string) bool
-	SetContainerState(containerName, state string) error
-	RemoveContainer(containerName string) error
-	AddContainer(containerName, state string) error
-	AddMockOutput(command string, output []byte)
-	WasCalled(cmd string) bool
-	Command(cmd string, args ...string) ([]byte, error)
-}
-
 // Run executes a command with the given arguments
 func (m *CommandState) Run(name string, args ...string) error {
 	m.mu.Lock()
@@ -299,7 +295,6 @@ func (m *CommandState) Run(name string, args ...string) error {
 			return fmt.Errorf("container does not exist")
 		}
 		return fmt.Errorf("invalid arguments")
-
 	case "lxc-destroy":
 		if len(args) >= 2 && args[0] == "-n" {
 			containerName := args[1]
@@ -307,7 +302,6 @@ func (m *CommandState) Run(name string, args ...string) error {
 			return nil
 		}
 		return fmt.Errorf("invalid arguments")
-
 	case "lxc-start":
 		if len(args) >= 2 && args[0] == "-n" {
 			containerName := args[1]
@@ -318,7 +312,6 @@ func (m *CommandState) Run(name string, args ...string) error {
 			return fmt.Errorf("container does not exist")
 		}
 		return fmt.Errorf("invalid arguments")
-
 	case "lxc-stop":
 		if len(args) >= 2 && args[0] == "-n" {
 			containerName := args[1]
@@ -350,8 +343,7 @@ func (m *CommandState) Output(name string, args ...string) ([]byte, error) {
 	}{name, args})
 
 	// Handle lxc commands
-	switch name {
-	case "lxc-info":
+	if name == "lxc-info" {
 		if len(args) >= 2 && args[0] == "-n" {
 			containerName := args[1]
 			if state, exists := m.ContainerStates[containerName]; exists {

@@ -3,9 +3,12 @@ package common
 import (
 	"fmt"
 	"net"
+	"os"
 	"regexp"
 	"strconv"
 	"strings"
+
+	"gopkg.in/yaml.v3"
 )
 
 // VPNConfig represents OpenVPN configuration
@@ -140,8 +143,17 @@ type ComposeConfig struct {
 
 // Load loads the configuration from a file
 func Load(configFile string) (*ComposeConfig, error) {
-	// Implement the function to load the configuration from a file
-	return nil, nil
+	data, err := os.ReadFile(configFile)
+	if err != nil {
+		return nil, fmt.Errorf("failed to read config file: %w", err)
+	}
+
+	var config ComposeConfig
+	if err := yaml.Unmarshal(data, &config); err != nil {
+		return nil, fmt.Errorf("failed to parse config file: %w", err)
+	}
+
+	return &config, nil
 }
 
 // ValidateNetworkConfig validates the network configuration

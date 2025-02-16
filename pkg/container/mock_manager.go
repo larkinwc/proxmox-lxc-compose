@@ -64,7 +64,7 @@ func (m *MockLXCManager) CreateContainerFromTemplate(templateName, containerName
 	return nil
 }
 
-func (m *MockLXCManager) CreateFromTemplate(templateName, containerName string, overrides interface{}) error {
+func (m *MockLXCManager) CreateFromTemplate(templateName, containerName string, _ interface{}) error {
 	template, exists := m.Templates[templateName]
 	if !exists {
 		return fmt.Errorf("template %s does not exist", templateName)
@@ -96,7 +96,7 @@ func (m *MockLXCManager) DeleteTemplate(templateName string) error {
 	return nil
 }
 
-func (m *MockLXCManager) SetNetworkBandwidthLimit(containerName string, limit NetworkBandwidthLimit) error {
+func (m *MockLXCManager) SetNetworkBandwidthLimit(containerName string, _ NetworkBandwidthLimit) error {
 	if _, exists := m.Containers[containerName]; !exists {
 		return fmt.Errorf("container %s does not exist", containerName)
 	}

@@ -3,6 +3,7 @@ package testutil
 import (
 	"bytes"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"os/exec"
@@ -400,7 +401,7 @@ func (m *MockCommandExecutor) SetActualExecution(enabled bool) {
 
 // AddErrorCommand adds a command that should return an error
 func (m *MockCommandExecutor) AddErrorCommand(cmd string, errMsg string) {
-	m.errorCmds[cmd] = fmt.Errorf(errMsg)
+	m.errorCmds[cmd] = errors.New(errMsg)
 }
 
 // Command creates a mocked exec.Command

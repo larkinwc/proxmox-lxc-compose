@@ -157,8 +157,33 @@ func containsOption(options []string, target string) bool {
 	return false
 }
 
-func validateDeviceConfig(device *common.DeviceConfig) error {
-	// ...existing code...
+// ValidateDeviceConfig validates a complete device configuration
+func ValidateDeviceConfig(device *common.DeviceConfig) error {
+	if device == nil {
+		return nil
+	}
+
+	if err := ValidateDeviceName(device.Name); err != nil {
+		return err
+	}
+
+	if err := ValidateDeviceType(device.Type); err != nil {
+		return err
+	}
+
+	if err := ValidateDevicePath(device.Source, true); err != nil {
+		return err
+	}
+
+	if device.Destination != "" {
+		if err := ValidateDevicePath(device.Destination, false); err != nil {
+			return err
+		}
+	}
+
+	if err := ValidateDeviceOptions(device.Type, device.Options); err != nil {
+		return err
+	}
 
 	return nil
 }

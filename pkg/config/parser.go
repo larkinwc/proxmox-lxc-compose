@@ -125,8 +125,8 @@ func Validate(container *Container) error {
 	return nil
 }
 
-// validateConfig performs basic validation of the configuration
-func validateConfig(config *ComposeConfig) error {
+// ValidateConfig performs basic validation of the configuration
+func ValidateConfig(config *ComposeConfig) error {
 	if config.Version == "" {
 		return fmt.Errorf("version is required")
 	}

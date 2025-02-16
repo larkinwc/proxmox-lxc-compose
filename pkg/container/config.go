@@ -455,3 +455,48 @@ func validateContainerConfig(container *common.Container) error {
 
 	return nil
 }
+
+// ApplyConfig applies the container configuration
+func (m *LXCManager) ApplyConfig(name string, cfg *common.Container) error {
+	return m.applyConfig(name, cfg)
+}
+
+// ApplyCPUConfig applies CPU configuration to the container
+func (m *LXCManager) ApplyCPUConfig(f *os.File, cfg *common.CPUConfig) error {
+	return m.applyCPUConfig(f, cfg)
+}
+
+// ApplyMemoryConfig applies memory configuration to the container
+func (m *LXCManager) ApplyMemoryConfig(f *os.File, cfg *common.MemoryConfig) error {
+	return m.applyMemoryConfig(f, cfg)
+}
+
+// ApplyNetworkConfig applies network configuration to the container
+func (m *LXCManager) ApplyNetworkConfig(f *os.File, cfg *common.NetworkConfig) error {
+	return m.applyNetworkConfig(f, cfg)
+}
+
+// ApplyStorageConfig applies storage configuration to the container
+func (m *LXCManager) ApplyStorageConfig(f *os.File, cfg *common.StorageConfig) error {
+	return m.applyStorageConfig(f, cfg)
+}
+
+// ApplySecurityConfig applies security configuration to the container
+func (m *LXCManager) ApplySecurityConfig(f *os.File, cfg *common.SecurityConfig) error {
+	return m.applySecurityConfig(f, cfg)
+}
+
+// ApplyEnvironmentConfig applies environment variables to the container
+func (m *LXCManager) ApplyEnvironmentConfig(f *os.File, env map[string]string) error {
+	return m.applyEnvironmentConfig(f, env)
+}
+
+// ApplyEntrypointConfig applies entrypoint and command configuration to the container
+func (m *LXCManager) ApplyEntrypointConfig(f *os.File, entrypoint, command []string) error {
+	return m.applyEntrypointConfig(f, entrypoint, command)
+}
+
+// WriteConfig writes a configuration key-value pair to the file
+func WriteConfig(f *os.File, key, value string) error {
+	return writeConfig(f, key, value)
+}
