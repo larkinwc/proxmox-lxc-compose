@@ -10,8 +10,8 @@ import (
 	"strings"
 	"testing"
 
-	"proxmox-lxc-compose/pkg/container"
-	testing_internal "proxmox-lxc-compose/pkg/internal/testing"
+	"github.com/larkinwc/proxmox-lxc-compose/pkg/container"
+	testing_internal "github.com/larkinwc/proxmox-lxc-compose/pkg/internal/testing"
 )
 
 type integrationTest struct {

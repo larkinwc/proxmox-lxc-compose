@@ -4,8 +4,8 @@ import (
 	"context"
 	"time"
 
-	"proxmox-lxc-compose/pkg/errors"
-	"proxmox-lxc-compose/pkg/logging"
+	"github.com/larkinwc/proxmox-lxc-compose/pkg/errors"
+	"github.com/larkinwc/proxmox-lxc-compose/pkg/logging"
 )
 
 // RetryConfig defines retry behavior

@@ -5,10 +5,10 @@ import (
 	"path/filepath"
 	"testing"
 
-	"proxmox-lxc-compose/pkg/common"
-	"proxmox-lxc-compose/pkg/container"
-	"proxmox-lxc-compose/pkg/internal/mock"
-	testing_internal "proxmox-lxc-compose/pkg/internal/testing"
+	"github.com/larkinwc/proxmox-lxc-compose/pkg/common"
+	"github.com/larkinwc/proxmox-lxc-compose/pkg/container"
+	"github.com/larkinwc/proxmox-lxc-compose/pkg/internal/mock"
+	testing_internal "github.com/larkinwc/proxmox-lxc-compose/pkg/internal/testing"
 )
 
 func TestConfigureNetwork(t *testing.T) {

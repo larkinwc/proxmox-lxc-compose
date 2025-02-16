@@ -6,7 +6,7 @@ import (
 	"os"
 	"time"
 
-	"proxmox-lxc-compose/pkg/container"
+	"github.com/larkinwc/proxmox-lxc-compose/pkg/container"
 
 	"github.com/spf13/cobra"
 )

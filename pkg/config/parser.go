@@ -3,7 +3,8 @@ package config
 import (
 	"fmt"
 	"os"
-	"proxmox-lxc-compose/pkg/validation"
+
+	"github.com/larkinwc/proxmox-lxc-compose/pkg/validation"
 
 	"gopkg.in/yaml.v3"
 )

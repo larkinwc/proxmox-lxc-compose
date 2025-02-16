@@ -1,4 +1,4 @@
-module proxmox-lxc-compose
+module github.com/larkinwc/proxmox-lxc-compose
 
 go 1.23.4
 

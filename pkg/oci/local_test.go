@@ -6,7 +6,7 @@ import (
 	"testing"
 	"time"
 
-	"proxmox-lxc-compose/pkg/logging"
+	"github.com/larkinwc/proxmox-lxc-compose/pkg/logging"
 )
 
 func TestLocalImageStore(t *testing.T) {

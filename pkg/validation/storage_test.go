@@ -5,7 +5,7 @@ import (
 	"strings"
 	"testing"
 
-	"proxmox-lxc-compose/pkg/common"
+	"github.com/larkinwc/proxmox-lxc-compose/pkg/common"
 )
 
 func TestValidateStorageSize(t *testing.T) {

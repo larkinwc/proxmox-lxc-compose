@@ -140,6 +140,11 @@ cd proxmox-lxc-compose
 go build -o lxc-compose ./cmd/lxc-compose
 ```
 
+You can optionally move the binary to your PATH:
+```bash
+sudo mv lxc-compose /usr/local/bin/
+```
+
 ## Configuration
 
 Configuration can be provided via:
@@ -179,7 +184,7 @@ lxc-compose ps
 lxc-compose logs [container_name]
 
 # Pull container images
-lxc-compose pull [image_name]
+lxc-compose images pull [registry/repository:tag]
 
 # Convert Docker images to LXC
 lxc-compose convert [image_name]

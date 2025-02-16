@@ -4,7 +4,7 @@ import (
 	"fmt"
 	"path/filepath"
 
-	"proxmox-lxc-compose/pkg/oci"
+	"github.com/larkinwc/proxmox-lxc-compose/pkg/oci"
 
 	"github.com/spf13/cobra"
 )

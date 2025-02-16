@@ -6,9 +6,10 @@ import (
 	"io"
 	"os"
 	"path/filepath"
-	"proxmox-lxc-compose/pkg/common"
 	"strings"
 	"time"
+
+	"github.com/larkinwc/proxmox-lxc-compose/pkg/common"
 )
 
 // Template represents a container template

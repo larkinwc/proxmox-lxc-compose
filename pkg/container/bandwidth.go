@@ -8,8 +8,8 @@ import (
 	"path/filepath"
 	"strings"
 
-	"proxmox-lxc-compose/pkg/common"
-	"proxmox-lxc-compose/pkg/logging"
+	"github.com/larkinwc/proxmox-lxc-compose/pkg/common"
+	"github.com/larkinwc/proxmox-lxc-compose/pkg/logging"
 )
 
 // NetworkBandwidthLimit represents bandwidth limits for a network interface

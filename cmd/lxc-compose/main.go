@@ -4,7 +4,7 @@ import (
 	"fmt"
 	"os"
 
-	"proxmox-lxc-compose/pkg/logging"
+	"github.com/larkinwc/proxmox-lxc-compose/pkg/logging"
 
 	"github.com/spf13/cobra"
 	"github.com/spf13/viper"

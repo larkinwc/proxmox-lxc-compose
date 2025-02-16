@@ -3,9 +3,10 @@ package validation
 import (
 	"fmt"
 	"path/filepath"
-	"proxmox-lxc-compose/pkg/common"
 	"regexp"
 	"strings"
+
+	"github.com/larkinwc/proxmox-lxc-compose/pkg/common"
 )
 
 // Supported device types

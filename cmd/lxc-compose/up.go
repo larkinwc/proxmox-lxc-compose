@@ -3,8 +3,8 @@ package main
 import (
 	"fmt"
 
-	"proxmox-lxc-compose/pkg/common"
-	"proxmox-lxc-compose/pkg/container"
+	"github.com/larkinwc/proxmox-lxc-compose/pkg/common"
+	"github.com/larkinwc/proxmox-lxc-compose/pkg/container"
 
 	"github.com/spf13/cobra"
 )

@@ -4,7 +4,7 @@ import (
 	"os"
 	"testing"
 
-	"proxmox-lxc-compose/pkg/security"
+	"github.com/larkinwc/proxmox-lxc-compose/pkg/security"
 )
 
 func TestProfileValidation(t *testing.T) {
