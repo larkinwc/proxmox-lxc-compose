@@ -8,10 +8,10 @@ import (
 	"strings"
 	"time"
 
-	"proxmox-lxc-compose/pkg/common"
-	"proxmox-lxc-compose/pkg/config"
-	"proxmox-lxc-compose/pkg/internal/recovery"
-	"proxmox-lxc-compose/pkg/logging"
+	"github.com/larkinwc/proxmox-lxc-compose/pkg/common"
+	"github.com/larkinwc/proxmox-lxc-compose/pkg/config"
+	"github.com/larkinwc/proxmox-lxc-compose/pkg/internal/recovery"
+	"github.com/larkinwc/proxmox-lxc-compose/pkg/logging"
 )
 
 // Manager defines the interface for managing LXC containers

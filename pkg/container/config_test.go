@@ -3,10 +3,10 @@ package container_test
 import (
 	"testing"
 
-	"proxmox-lxc-compose/pkg/config"
-	"proxmox-lxc-compose/pkg/container"
-	"proxmox-lxc-compose/pkg/internal/mock"
-	testing_internal "proxmox-lxc-compose/pkg/internal/testing"
+	"github.com/larkinwc/proxmox-lxc-compose/pkg/config"
+	"github.com/larkinwc/proxmox-lxc-compose/pkg/container"
+	"github.com/larkinwc/proxmox-lxc-compose/pkg/internal/mock"
+	testing_internal "github.com/larkinwc/proxmox-lxc-compose/pkg/internal/testing"
 )
 
 func TestContainerConfiguration(t *testing.T) {

@@ -1,9 +1,9 @@
 package config_test
 
 import (
-	"proxmox-lxc-compose/pkg/common"
-	"proxmox-lxc-compose/pkg/config"
-	testing_internal "proxmox-lxc-compose/pkg/internal/testing"
+	"github.com/larkinwc/proxmox-lxc-compose/pkg/common"
+	"github.com/larkinwc/proxmox-lxc-compose/pkg/config"
+	testing_internal "github.com/larkinwc/proxmox-lxc-compose/pkg/internal/testing"
 	"strings"
 	"testing"
 )

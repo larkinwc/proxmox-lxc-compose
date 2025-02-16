@@ -129,7 +129,7 @@ The main purpose of the CLI is to read a lxc-compose.yml file and use it to crea
 ## Installation
 
 ```bash
-go install github.com/yourusername/proxmox-lxc-compose@latest
+go install github.com/larkinwc/proxmox-lxc-compose@latest
 ```
 
 Or build from source:
@@ -138,6 +138,11 @@ Or build from source:
 git clone https://github.com/larkinwc/proxmox-lxc-compose.git
 cd proxmox-lxc-compose
 go build -o lxc-compose ./cmd/lxc-compose
+```
+
+You can optionally move the binary to your PATH:
+```bash
+sudo mv lxc-compose /usr/local/bin/
 ```
 
 ## Configuration
@@ -179,7 +184,7 @@ lxc-compose ps
 lxc-compose logs [container_name]
 
 # Pull container images
-lxc-compose pull [image_name]
+lxc-compose images pull [registry/repository:tag]
 
 # Convert Docker images to LXC
 lxc-compose convert [image_name]

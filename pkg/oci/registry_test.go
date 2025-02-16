@@ -7,8 +7,8 @@ import (
 	"testing"
 	"time"
 
-	"proxmox-lxc-compose/pkg/logging"
-	"proxmox-lxc-compose/pkg/testutil"
+	"github.com/larkinwc/proxmox-lxc-compose/pkg/logging"
+	"github.com/larkinwc/proxmox-lxc-compose/pkg/testutil"
 )
 
 func setupRegistryTest(t *testing.T) (*RegistryManager, *testutil.MockCommandExecutor, string, func()) {

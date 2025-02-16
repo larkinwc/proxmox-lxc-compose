@@ -4,7 +4,7 @@ import (
 	"fmt"
 	"strings"
 
-	"proxmox-lxc-compose/pkg/errors"
+	"github.com/larkinwc/proxmox-lxc-compose/pkg/errors"
 )
 
 // Profile represents container security settings

@@ -1,7 +1,7 @@
 package container
 
 import (
-	"proxmox-lxc-compose/pkg/config"
+	"github.com/larkinwc/proxmox-lxc-compose/pkg/config"
 )
 
 // Container represents a running or stopped LXC container

@@ -6,7 +6,7 @@ import (
 	"strconv"
 	"strings"
 
-	"proxmox-lxc-compose/pkg/common"
+	"github.com/larkinwc/proxmox-lxc-compose/pkg/common"
 )
 
 var (

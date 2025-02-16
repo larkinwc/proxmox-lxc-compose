@@ -3,10 +3,11 @@ package validation
 import (
 	"fmt"
 	"net"
-	"proxmox-lxc-compose/pkg/common"
 	"regexp"
 	"strconv"
 	"strings"
+
+	"github.com/larkinwc/proxmox-lxc-compose/pkg/common"
 )
 
 // Supported network types

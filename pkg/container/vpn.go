@@ -6,8 +6,8 @@ import (
 	"path/filepath"
 	"text/template"
 
-	"proxmox-lxc-compose/pkg/common"
-	"proxmox-lxc-compose/pkg/logging"
+	"github.com/larkinwc/proxmox-lxc-compose/pkg/common"
+	"github.com/larkinwc/proxmox-lxc-compose/pkg/logging"
 )
 
 // // VPNConfig represents OpenVPN configuration

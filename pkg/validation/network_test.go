@@ -4,7 +4,7 @@ import (
 	"strings"
 	"testing"
 
-	"proxmox-lxc-compose/pkg/common"
+	"github.com/larkinwc/proxmox-lxc-compose/pkg/common"
 )
 
 func TestValidateNetworkType(t *testing.T) {

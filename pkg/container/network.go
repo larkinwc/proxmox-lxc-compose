@@ -8,8 +8,8 @@ import (
 	"strconv"
 	"strings"
 
-	"proxmox-lxc-compose/pkg/config"
-	"proxmox-lxc-compose/pkg/logging"
+	"github.com/larkinwc/proxmox-lxc-compose/pkg/config"
+	"github.com/larkinwc/proxmox-lxc-compose/pkg/logging"
 )
 
 // configureNetwork configures network settings for a container

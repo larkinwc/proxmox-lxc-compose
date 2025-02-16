@@ -2,7 +2,7 @@ package config
 
 import (
 	"fmt"
-	"proxmox-lxc-compose/pkg/common"
+	"github.com/larkinwc/proxmox-lxc-compose/pkg/common"
 	"strconv"
 	"strings"
 )

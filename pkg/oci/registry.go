@@ -7,9 +7,9 @@ import (
 	"os/exec"
 	"time"
 
-	"proxmox-lxc-compose/pkg/errors"
-	"proxmox-lxc-compose/pkg/internal/recovery"
-	"proxmox-lxc-compose/pkg/logging"
+	"github.com/larkinwc/proxmox-lxc-compose/pkg/errors"
+	"github.com/larkinwc/proxmox-lxc-compose/pkg/internal/recovery"
+	"github.com/larkinwc/proxmox-lxc-compose/pkg/logging"
 )
 
 // execCommand is a variable that allows us to mock exec.Command during tests

@@ -4,8 +4,9 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
-	"proxmox-lxc-compose/pkg/common"
 	"strings"
+
+	"github.com/larkinwc/proxmox-lxc-compose/pkg/common"
 )
 
 // applyConfig applies the container configuration

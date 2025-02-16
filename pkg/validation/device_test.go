@@ -4,7 +4,7 @@ import (
 	"path/filepath"
 	"testing"
 
-	testing_internal "proxmox-lxc-compose/pkg/internal/testing"
+	testing_internal "github.com/larkinwc/proxmox-lxc-compose/pkg/internal/testing"
 )
 
 func TestValidateDeviceType(t *testing.T) {
