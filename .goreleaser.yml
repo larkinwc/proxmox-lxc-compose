@@ -57,19 +57,19 @@ changelog:
       - Merge pull request
       - Merge branch
 
-brews:
-  - name: proxmox-lxc-compose
-    tap:
-      owner: larkinwc
-      name: homebrew-tap
-    folder: Formula
-    homepage: "https://github.com/larkinwc/proxmox-lxc-compose"
-    description: "A docker-compose like tool for managing LXC containers in Proxmox"
-    license: "MIT"
-    test: |
-      system "#{bin}/lxc-compose --version"
-    install: |
-      bin.install "lxc-compose"
+# brews:
+#   - name: proxmox-lxc-compose
+#     tap:
+#       owner: larkinwc
+#       name: homebrew-tap
+#     folder: Formula
+#     homepage: "https://github.com/larkinwc/proxmox-lxc-compose"
+#     description: "A docker-compose like tool for managing LXC containers in Proxmox"
+#     license: "MIT"
+#     test: |
+#       system "#{bin}/lxc-compose --version"
+#     install: |
+#       bin.install "lxc-compose"
 
 dockers:
   - image_templates:
