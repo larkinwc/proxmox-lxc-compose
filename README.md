@@ -128,12 +128,12 @@ The main purpose of the CLI is to read a lxc-compose.yml file and use it to crea
 
 ## Installation
 
+Install directly using Go:
 ```bash
-go install github.com/larkinwc/proxmox-lxc-compose@latest
+go install github.com/larkinwc/proxmox-lxc-compose/cmd/lxc-compose@latest
 ```
 
 Or build from source:
-
 ```bash
 git clone https://github.com/larkinwc/proxmox-lxc-compose.git
 cd proxmox-lxc-compose
