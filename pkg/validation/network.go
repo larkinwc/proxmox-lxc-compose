@@ -3,6 +3,7 @@ package validation
 import (
 	"fmt"
 	"net"
+	"proxmox-lxc-compose/pkg/common"
 	"regexp"
 	"strconv"
 	"strings"
@@ -77,6 +78,9 @@ func ValidateDNSServers(servers []string) error {
 	}
 
 	for _, server := range servers {
+		if server == "" {
+			return fmt.Errorf("DNS server IP cannot be empty")
+		}
 		ip := net.ParseIP(server)
 		if ip == nil {
 			return fmt.Errorf("invalid DNS server IP address: %s", server)
@@ -129,11 +133,16 @@ func ValidateHostname(hostname string) error {
 // ValidateMTU validates the MTU value
 func ValidateMTU(mtu int) error {
 	if mtu == 0 {
-		return nil
+		return nil // Default MTU
 	}
 
-	if mtu < 68 || mtu > 65535 {
-		return fmt.Errorf("MTU must be between 68 and 65535")
+	// Standard minimum MTU values:
+	// - IPv4: 576 (RFC 791)
+	// - IPv6: 1280 (RFC 8200)
+	// - Ethernet: 1500 (most common)
+	// Using 576 as absolute minimum for compatibility
+	if mtu < 576 || mtu > 65535 {
+		return fmt.Errorf("invalid MTU: must be between 576 and 65535")
 	}
 
 	return nil
@@ -192,10 +201,27 @@ func ValidateSearchDomains(domains []string) error {
 	}
 
 	for _, domain := range domains {
-		if err := ValidateHostname(domain); err != nil {
-			return fmt.Errorf("invalid search domain %q: %w", domain, err)
+		if domain == "" {
+			return fmt.Errorf("search domain cannot be empty")
+		}
+
+		// Domain name validation according to RFC 1034
+		if len(domain) > 253 {
+			return fmt.Errorf("invalid search domain %q: domain name too long", domain)
+		}
+
+		labels := strings.Split(domain, ".")
+		for _, label := range labels {
+			if len(label) == 0 || len(label) > 63 {
+				return fmt.Errorf("invalid search domain %q: label must be between 1 and 63 characters", domain)
+			}
+
+			if !regexp.MustCompile(`^[a-zA-Z0-9]([a-zA-Z0-9-]*[a-zA-Z0-9])?$`).MatchString(label) {
+				return fmt.Errorf("invalid search domain %q: label must start and end with alphanumeric characters and can contain hyphens", domain)
+			}
 		}
 	}
+
 	return nil
 }
 
@@ -247,6 +273,41 @@ func ValidateNetworkInterface(iface *NetworkInterface) error {
 
 	if err := ValidateMAC(iface.MAC); err != nil {
 		return err
+	}
+
+	return nil
+}
+
+// ValidateVPNConfig validates the VPN configuration
+func ValidateVPNConfig(cfg *common.VPNConfig) error {
+	if cfg == nil {
+		return nil
+	}
+
+	if cfg.Remote == "" {
+		return fmt.Errorf("VPN remote server address is required")
+	}
+
+	if cfg.Port <= 0 || cfg.Port > 65535 {
+		return fmt.Errorf("invalid VPN port: must be between 1 and 65535")
+	}
+
+	if cfg.Protocol != "tcp" && cfg.Protocol != "udp" {
+		return fmt.Errorf("invalid VPN protocol: must be tcp or udp")
+	}
+
+	if cfg.Config == "" && cfg.CA == "" {
+		return fmt.Errorf("either OpenVPN config file or CA certificate is required")
+	}
+
+	if cfg.Auth != nil {
+		if cfg.Auth["username"] == "" || cfg.Auth["password"] == "" {
+			return fmt.Errorf("both username and password are required for VPN authentication")
+		}
+	}
+
+	if (cfg.Cert != "" && cfg.Key == "") || (cfg.Cert == "" && cfg.Key != "") {
+		return fmt.Errorf("both certificate and key must be provided together")
 	}
 
 	return nil

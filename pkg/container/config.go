@@ -4,13 +4,12 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"proxmox-lxc-compose/pkg/common"
 	"strings"
-
-	"proxmox-lxc-compose/pkg/config"
 )
 
 // applyConfig applies the container configuration
-func (m *LXCManager) applyConfig(name string, cfg *config.Container) error {
+func (m *LXCManager) applyConfig(name string, cfg *common.Container) error {
 	configPath := filepath.Join(m.configPath, name, "config")
 
 	// Create config file if it doesn't exist
@@ -64,7 +63,7 @@ func (m *LXCManager) applyConfig(name string, cfg *config.Container) error {
 	return nil
 }
 
-func (m *LXCManager) applyCPUConfig(f *os.File, cfg *config.CPUConfig) error {
+func (m *LXCManager) applyCPUConfig(f *os.File, cfg *common.CPUConfig) error {
 	if cfg == nil {
 		return nil
 	}
@@ -96,7 +95,7 @@ func (m *LXCManager) applyCPUConfig(f *os.File, cfg *config.CPUConfig) error {
 	return nil
 }
 
-func (m *LXCManager) applyMemoryConfig(f *os.File, cfg *config.MemoryConfig) error {
+func (m *LXCManager) applyMemoryConfig(f *os.File, cfg *common.MemoryConfig) error {
 	if cfg == nil {
 		return nil
 	}
@@ -116,33 +115,52 @@ func (m *LXCManager) applyMemoryConfig(f *os.File, cfg *config.MemoryConfig) err
 	return nil
 }
 
-func (m *LXCManager) applyNetworkConfig(f *os.File, cfg *config.NetworkConfig) error {
+func (m *LXCManager) applyNetworkConfig(f *os.File, cfg *common.NetworkConfig) error {
 	if cfg == nil {
 		return nil
 	}
 
+	// Write network type
 	if err := writeConfig(f, "lxc.net.0.type", cfg.Type); err != nil {
 		return err
 	}
 
+	// Write bridge if specified
 	if cfg.Bridge != "" {
 		if err := writeConfig(f, "lxc.net.0.link", cfg.Bridge); err != nil {
 			return err
 		}
 	}
 
-	if cfg.IP != "" {
+	// Write interface name if specified
+	if cfg.Interface != "" {
+		if err := writeConfig(f, "lxc.net.0.name", cfg.Interface); err != nil {
+			return err
+		}
+	}
+
+	// Write IP configuration
+	if cfg.DHCP {
+		if err := writeConfig(f, "lxc.net.0.ipv4.method", "dhcp"); err != nil {
+			return err
+		}
+		if err := writeConfig(f, "lxc.net.0.ipv6.method", "dhcp"); err != nil {
+			return err
+		}
+	} else if cfg.IP != "" {
 		if err := writeConfig(f, "lxc.net.0.ipv4.address", cfg.IP); err != nil {
 			return err
 		}
 	}
 
+	// Write gateway if specified
 	if cfg.Gateway != "" {
 		if err := writeConfig(f, "lxc.net.0.ipv4.gateway", cfg.Gateway); err != nil {
 			return err
 		}
 	}
 
+	// Write DNS servers
 	if len(cfg.DNS) > 0 {
 		for i, dns := range cfg.DNS {
 			key := fmt.Sprintf("lxc.net.0.ipv4.nameserver.%d", i)
@@ -152,10 +170,110 @@ func (m *LXCManager) applyNetworkConfig(f *os.File, cfg *config.NetworkConfig) e
 		}
 	}
 
+	// Write hostname if specified
+	if cfg.Hostname != "" {
+		if err := writeConfig(f, "lxc.net.0.hostname", cfg.Hostname); err != nil {
+			return err
+		}
+	}
+
+	// Write MTU if specified
+	if cfg.MTU > 0 {
+		if err := writeConfig(f, "lxc.net.0.mtu", fmt.Sprintf("%d", cfg.MTU)); err != nil {
+			return err
+		}
+	}
+
+	// Write MAC address if specified
+	if cfg.MAC != "" {
+		if err := writeConfig(f, "lxc.net.0.hwaddr", cfg.MAC); err != nil {
+			return err
+		}
+	}
+
+	// Configure additional interfaces
+	if len(cfg.Interfaces) > 0 {
+		for i, iface := range cfg.Interfaces {
+			prefix := fmt.Sprintf("lxc.net.%d", i)
+
+			if err := writeConfig(f, prefix+".type", iface.Type); err != nil {
+				return err
+			}
+
+			if iface.Bridge != "" {
+				if err := writeConfig(f, prefix+".link", iface.Bridge); err != nil {
+					return err
+				}
+			}
+
+			if iface.Interface != "" {
+				if err := writeConfig(f, prefix+".name", iface.Interface); err != nil {
+					return err
+				}
+			}
+
+			if iface.DHCP {
+				if err := writeConfig(f, prefix+".ipv4.method", "dhcp"); err != nil {
+					return err
+				}
+			} else if iface.IP != "" {
+				if err := writeConfig(f, prefix+".ipv4.address", iface.IP); err != nil {
+					return err
+				}
+			}
+
+			if iface.Gateway != "" {
+				if err := writeConfig(f, prefix+".ipv4.gateway", iface.Gateway); err != nil {
+					return err
+				}
+			}
+
+			if len(iface.DNS) > 0 {
+				for j, dns := range iface.DNS {
+					key := fmt.Sprintf("%s.ipv4.nameserver.%d", prefix, j)
+					if err := writeConfig(f, key, dns); err != nil {
+						return err
+					}
+				}
+			}
+
+			if iface.MTU > 0 {
+				if err := writeConfig(f, prefix+".mtu", fmt.Sprintf("%d", iface.MTU)); err != nil {
+					return err
+				}
+			}
+
+			if iface.MAC != "" {
+				if err := writeConfig(f, prefix+".hwaddr", iface.MAC); err != nil {
+					return err
+				}
+			}
+		}
+	}
+
+	// Configure port forwarding
+	if len(cfg.PortForwards) > 0 {
+		for _, pf := range cfg.PortForwards {
+			// Add pre-start hook for port forwarding
+			preStartCmd := fmt.Sprintf("iptables -t nat -A PREROUTING -p %s --dport %d -j DNAT --to %s:%d",
+				pf.Protocol, pf.Host, cfg.IP, pf.Guest)
+			if err := writeConfig(f, "lxc.hook.pre-start", preStartCmd); err != nil {
+				return err
+			}
+
+			// Add post-stop hook to clean up port forwarding
+			postStopCmd := fmt.Sprintf("iptables -t nat -D PREROUTING -p %s --dport %d -j DNAT --to %s:%d",
+				pf.Protocol, pf.Host, cfg.IP, pf.Guest)
+			if err := writeConfig(f, "lxc.hook.post-stop", postStopCmd); err != nil {
+				return err
+			}
+		}
+	}
+
 	return nil
 }
 
-func (m *LXCManager) applyStorageConfig(f *os.File, cfg *config.StorageConfig) error {
+func (m *LXCManager) applyStorageConfig(f *os.File, cfg *common.StorageConfig) error {
 	if cfg == nil {
 		return nil
 	}
@@ -212,49 +330,7 @@ func (m *LXCManager) applyStorageConfig(f *os.File, cfg *config.StorageConfig) e
 	return nil
 }
 
-func (m *LXCManager) applyEnvironmentConfig(f *os.File, env map[string]string) error {
-	if len(env) == 0 {
-		return nil
-	}
-
-	// Write environment variables to container config
-	for key, value := range env {
-		if err := writeConfig(f, "lxc.environment", fmt.Sprintf("%s=%s", key, value)); err != nil {
-			return fmt.Errorf("failed to set environment variable %s: %w", key, err)
-		}
-	}
-
-	return nil
-}
-
-func (m *LXCManager) applyEntrypointConfig(f *os.File, entrypoint, command []string) error {
-	// If neither entrypoint nor command is set, return
-	if len(entrypoint) == 0 && len(command) == 0 {
-		return nil
-	}
-
-	// Combine entrypoint and command
-	var cmd []string
-	cmd = append(cmd, entrypoint...)
-	cmd = append(cmd, command...)
-
-	// Create the init script that will be executed when the container starts
-	initScript := filepath.Join(m.configPath, "init.sh")
-	if err := os.WriteFile(initScript, []byte(fmt.Sprintf(`#!/bin/sh
-exec %s
-`, strings.Join(cmd, " "))), 0755); err != nil {
-		return fmt.Errorf("failed to create init script: %w", err)
-	}
-
-	// Set the init script as the container's init command
-	if err := writeConfig(f, "lxc.init.cmd", initScript); err != nil {
-		return fmt.Errorf("failed to set init command: %w", err)
-	}
-
-	return nil
-}
-
-func (m *LXCManager) applySecurityConfig(f *os.File, cfg *config.SecurityConfig) error {
+func (m *LXCManager) applySecurityConfig(f *os.File, cfg *common.SecurityConfig) error {
 	if cfg == nil {
 		// Apply default security settings
 		return writeConfig(f, "lxc.apparmor.profile", "lxc-container-default")
@@ -306,7 +382,76 @@ func (m *LXCManager) applySecurityConfig(f *os.File, cfg *config.SecurityConfig)
 	return nil
 }
 
+func (m *LXCManager) applyEnvironmentConfig(f *os.File, env map[string]string) error {
+	if len(env) == 0 {
+		return nil
+	}
+	// Write environment variables to container config
+	for key, value := range env {
+		if err := writeConfig(f, "lxc.environment", fmt.Sprintf("%s=%s", key, value)); err != nil {
+			return fmt.Errorf("failed to set environment variable %s: %w", key, err)
+		}
+	}
+	return nil
+}
+
+func (m *LXCManager) applyEntrypointConfig(f *os.File, entrypoint, command []string) error {
+	// If neither entrypoint nor command is set, return
+	if len(entrypoint) == 0 && len(command) == 0 {
+		return nil
+	}
+
+	// Combine entrypoint and command
+	var cmd []string
+	cmd = append(cmd, entrypoint...)
+	cmd = append(cmd, command...)
+
+	// Create the init script that will be executed when the container starts
+	initScript := filepath.Join(m.configPath, "init.sh")
+	if err := os.WriteFile(initScript, []byte(fmt.Sprintf(`#!/bin/sh
+exec %s
+`, strings.Join(cmd, " "))), 0755); err != nil {
+		return fmt.Errorf("failed to create init script: %w", err)
+	}
+
+	// Set the init script as the container's init command
+	if err := writeConfig(f, "lxc.init.cmd", initScript); err != nil {
+		return fmt.Errorf("failed to set init command: %w", err)
+	}
+	return nil
+}
+
 func writeConfig(f *os.File, key, value string) error {
 	_, err := fmt.Fprintf(f, "%s = %s\n", key, value)
 	return err
+}
+
+func validateContainerConfig(container *common.Container) error {
+	// Validate network configuration
+	if container.Network != nil {
+		if container.Network.Type != "" && container.Network.Type != "bridge" && container.Network.Type != "veth" {
+			return fmt.Errorf("invalid network type: %s", container.Network.Type)
+		}
+
+		networkCfg := &common.NetworkConfig{
+			Type:      container.Network.Type,
+			Bridge:    container.Network.Bridge,
+			Interface: container.Network.Interface,
+			IP:        container.Network.IP,
+			Gateway:   container.Network.Gateway,
+			DNS:       container.Network.DNS,
+			DHCP:      container.Network.DHCP,
+			Hostname:  container.Network.Hostname,
+			MTU:       container.Network.MTU,
+			MAC:       container.Network.MAC,
+		}
+		err := common.ValidateNetworkConfig(networkCfg)
+		if err != nil {
+			return fmt.Errorf("invalid network configuration: %w", err)
+		}
+	}
+
+	// ... existing code ...
+
+	return nil
 }

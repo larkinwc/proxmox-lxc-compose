@@ -6,10 +6,8 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"time"
-
-	"proxmox-lxc-compose/pkg/errors"
-	"proxmox-lxc-compose/pkg/logging"
 )
 
 type ImageMetadata struct {
@@ -17,233 +15,315 @@ type ImageMetadata struct {
 	StoredAt int64 `json:"stored_at"`
 }
 
+type cachedImage struct {
+	Data      []byte
+	Timestamp int64
+}
+
+// LocalImageStore represents a local OCI image store
 type LocalImageStore struct {
-	storageDir string
-	cacheTTL   int64 // Time in seconds before cached images expire
+	rootDir  string
+	cacheTTL time.Duration
+	mu       sync.RWMutex
+	cache    map[string]*cachedImage
+	ttl      int64
 }
 
 // NewLocalImageStore creates a new local image store
-func NewLocalImageStore(storageDir string) (*LocalImageStore, error) {
-	if err := os.MkdirAll(storageDir, 0755); err != nil {
-		return nil, errors.Wrap(err, errors.ErrStorage, "failed to create storage directory").
-			WithDetails(map[string]interface{}{
-				"path": storageDir,
-			})
+func NewLocalImageStore(rootDir string) (*LocalImageStore, error) {
+	if err := os.MkdirAll(rootDir, 0755); err != nil {
+		return nil, fmt.Errorf("failed to create image store directory: %w", err)
 	}
-	logging.Debug("Created image storage directory", "path", storageDir)
 	return &LocalImageStore{
-		storageDir: storageDir,
-		cacheTTL:   86400, // Default 24 hour TTL
+		rootDir: rootDir,
+		cache:   make(map[string]*cachedImage),
+		ttl:     86400, // 24 hours default TTL
 	}, nil
 }
 
-// SetCacheTTL sets the cache time-to-live in seconds
-func (s *LocalImageStore) SetCacheTTL(seconds int64) {
-	s.cacheTTL = seconds
-}
-
-func (s *LocalImageStore) imagePath(ref ImageReference) string {
-	// Create a unique filename based on the image reference
-	// Replace slashes with underscores to avoid invalid paths
-	repo := strings.ReplaceAll(ref.Repository, "/", "_")
-	name := fmt.Sprintf("%s_%s_%s", ref.Registry, repo, ref.Tag)
-	if ref.Digest != "" {
-		name = fmt.Sprintf("%s@%s", name, ref.Digest)
+// Get retrieves an image from local storage
+func (s *LocalImageStore) Get(ref ImageReference) ([]byte, error) {
+	if s == nil {
+		return nil, fmt.Errorf("store is nil")
 	}
-	return filepath.Join(s.storageDir, name)
+	if err := validateReference(ref); err != nil {
+		return nil, err
+	}
+
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+
+	// Check cache first
+	if s.cache != nil && s.ttl > 0 {
+		key := ref.String()
+		if cached, ok := s.cache[key]; ok {
+			if time.Now().Unix()-cached.Timestamp < s.ttl {
+				return cached.Data, nil
+			}
+			delete(s.cache, key)
+			return nil, fmt.Errorf("image expired: %s", ref.String())
+		}
+	}
+
+	// Read from disk
+	path := s.getImagePath(ref)
+	data, err := os.ReadFile(path)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return nil, fmt.Errorf("image not found: %s", ref.String())
+		}
+		return nil, err
+	}
+
+	// Update cache
+	if s.cache != nil && s.ttl > 0 {
+		s.cache[ref.String()] = &cachedImage{
+			Data:      data,
+			Timestamp: time.Now().Unix(),
+		}
+	}
+
+	return data, nil
 }
 
-// Store stores image data with metadata including timestamp
+// Store stores an image in local storage
 func (s *LocalImageStore) Store(ref ImageReference, data []byte) error {
-	path := s.imagePath(ref)
-	logging.Debug("Storing image",
-		"path", path,
-		"size", len(data))
-
-	// Create parent directories if they don't exist
-	dir := filepath.Dir(path)
-	if err := os.MkdirAll(dir, 0755); err != nil {
-		return errors.Wrap(err, errors.ErrStorage, "failed to create image directory").
-			WithDetails(map[string]interface{}{
-				"path": dir,
-			})
+	if s == nil {
+		return fmt.Errorf("store is nil")
+	}
+	if err := validateReference(ref); err != nil {
+		return err
 	}
 
-	// Store image data
-	if err := os.WriteFile(path+".tar", data, 0644); err != nil {
-		return errors.Wrap(err, errors.ErrStorage, "failed to write image data").
-			WithDetails(map[string]interface{}{
-				"path": path + ".tar",
-				"size": len(data),
-			})
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	path := s.getImagePath(ref)
+	if err := os.MkdirAll(filepath.Dir(path), 0755); err != nil {
+		return fmt.Errorf("failed to create image directory: %w", err)
 	}
 
+	if err := os.WriteFile(path, data, 0644); err != nil {
+		return fmt.Errorf("failed to write image file: %w", err)
+	}
+
+	// Update metadata
 	metadata := ImageMetadata{
 		ImageReference: ref,
 		StoredAt:       time.Now().Unix(),
 	}
-
-	metadataBytes, err := json.Marshal(metadata)
-	if err != nil {
-		return errors.Wrap(err, errors.ErrInternal, "failed to marshal metadata")
+	if err := s.updateMetadata(metadata); err != nil {
+		_ = os.Remove(path) // Clean up image file if metadata update fails
+		return fmt.Errorf("failed to update metadata: %w", err)
 	}
 
-	if err := os.WriteFile(path+".json", metadataBytes, 0644); err != nil {
-		return errors.Wrap(err, errors.ErrStorage, "failed to write metadata").
-			WithDetails(map[string]interface{}{
-				"path": path + ".json",
-			})
+	// Update cache
+	if s.cache != nil && s.ttl > 0 {
+		s.cache[ref.String()] = &cachedImage{
+			Data:      data,
+			Timestamp: time.Now().Unix(),
+		}
 	}
 
-	logging.Info("Successfully stored image",
-		"registry", ref.Registry,
-		"repository", ref.Repository,
-		"tag", ref.Tag)
 	return nil
 }
 
-func (s *LocalImageStore) Retrieve(ref ImageReference) ([]byte, error) {
-	path := s.imagePath(ref)
-	logging.Debug("Retrieving image", "path", path)
+// List returns all stored images
+func (s *LocalImageStore) List() ([]ImageReference, error) {
+	if s == nil {
+		return nil, fmt.Errorf("store is nil")
+	}
 
-	data, err := os.ReadFile(path + ".tar")
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+
+	metadataList, err := s.readMetadata()
+	if err != nil {
+		return nil, fmt.Errorf("failed to read metadata: %w", err)
+	}
+
+	var refs []ImageReference
+	for _, metadata := range metadataList {
+		if s.ttl <= 0 || time.Now().Unix()-metadata.StoredAt < s.ttl {
+			refs = append(refs, metadata.ImageReference)
+		}
+	}
+	return refs, nil
+}
+
+func (s *LocalImageStore) readMetadata() ([]ImageMetadata, error) {
+	metadataPath := filepath.Join(s.rootDir, "metadata.json")
+	data, err := os.ReadFile(metadataPath)
 	if err != nil {
 		if os.IsNotExist(err) {
-			return nil, errors.New(errors.ErrStorage, "image not found in local storage").
-				WithDetails(map[string]interface{}{
-					"path": path + ".tar",
-				})
+			return []ImageMetadata{}, nil
 		}
-		return nil, errors.Wrap(err, errors.ErrStorage, "failed to read image data").
-			WithDetails(map[string]interface{}{
-				"path": path + ".tar",
-			})
+		return nil, err
 	}
 
-	logging.Debug("Successfully retrieved image",
-		"path", path,
-		"size", len(data))
-	return data, nil
+	var metadataList []ImageMetadata
+	if err := json.Unmarshal(data, &metadataList); err != nil {
+		return nil, fmt.Errorf("invalid metadata format: %w", err)
+	}
+	return metadataList, nil
 }
 
+func (s *LocalImageStore) updateMetadata(newMetadata ImageMetadata) error {
+	metadataList, err := s.readMetadata()
+	if err != nil && !os.IsNotExist(err) {
+		return err
+	}
+
+	// Update or append metadata
+	found := false
+	for i, metadata := range metadataList {
+		if metadata.ImageReference == newMetadata.ImageReference {
+			metadataList[i] = newMetadata
+			found = true
+			break
+		}
+	}
+	if !found {
+		metadataList = append(metadataList, newMetadata)
+	}
+
+	// Write updated metadata
+	data, err := json.Marshal(metadataList)
+	if err != nil {
+		return err
+	}
+
+	metadataPath := filepath.Join(s.rootDir, "metadata.json")
+	return os.WriteFile(metadataPath, data, 0644)
+}
+
+func (s *LocalImageStore) removeFromMetadata(ref ImageReference) error {
+	metadataList, err := s.readMetadata()
+	if err != nil && !os.IsNotExist(err) {
+		return err
+	}
+
+	// Remove metadata entry
+	newList := make([]ImageMetadata, 0, len(metadataList))
+	for _, metadata := range metadataList {
+		if metadata.ImageReference != ref {
+			newList = append(newList, metadata)
+		}
+	}
+
+	// Write updated metadata
+	data, err := json.Marshal(newList)
+	if err != nil {
+		return err
+	}
+
+	metadataPath := filepath.Join(s.rootDir, "metadata.json")
+	return os.WriteFile(metadataPath, data, 0644)
+}
+
+// Remove removes an image from local storage
 func (s *LocalImageStore) Remove(ref ImageReference) error {
-	path := s.imagePath(ref)
-	logging.Debug("Removing image", "path", path)
-
-	if err := os.Remove(path + ".tar"); err != nil && !os.IsNotExist(err) {
-		return errors.Wrap(err, errors.ErrStorage, "failed to remove image data").
-			WithDetails(map[string]interface{}{
-				"path": path + ".tar",
-			})
+	if s == nil {
+		return fmt.Errorf("store is nil")
+	}
+	if err := validateReference(ref); err != nil {
+		return err
 	}
 
-	if err := os.Remove(path + ".json"); err != nil && !os.IsNotExist(err) {
-		return errors.Wrap(err, errors.ErrStorage, "failed to remove metadata").
-			WithDetails(map[string]interface{}{
-				"path": path + ".json",
-			})
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	path := s.getImagePath(ref)
+	if err := os.Remove(path); err != nil {
+		if !os.IsNotExist(err) {
+			return fmt.Errorf("failed to remove image file: %w", err)
+		}
 	}
 
-	logging.Info("Successfully removed image",
-		"registry", ref.Registry,
-		"repository", ref.Repository,
-		"tag", ref.Tag)
+	if err := s.removeFromMetadata(ref); err != nil {
+		return fmt.Errorf("failed to update metadata: %w", err)
+	}
+
+	// Remove from cache
+	if s.cache != nil {
+		delete(s.cache, ref.String())
+	}
+
 	return nil
 }
 
-func (s *LocalImageStore) List() ([]ImageReference, error) {
-	logging.Debug("Listing images in storage directory", "path", s.storageDir)
-
-	entries, err := os.ReadDir(s.storageDir)
-	if err != nil {
-		return nil, errors.Wrap(err, errors.ErrStorage, "failed to read storage directory").
-			WithDetails(map[string]interface{}{
-				"path": s.storageDir,
-			})
-	}
-
-	var images []ImageReference
-	for _, entry := range entries {
-		// Skip directories and non-json files
-		if entry.IsDir() || !strings.HasSuffix(entry.Name(), ".json") {
-			continue
-		}
-
-		// Read metadata file
-		data, err := os.ReadFile(filepath.Join(s.storageDir, entry.Name()))
-		if err != nil {
-			logging.Warn("Failed to read image metadata",
-				"file", entry.Name(),
-				"error", err)
-			continue
-		}
-
-		// Parse metadata
-		var ref ImageReference
-		if err := json.Unmarshal(data, &ref); err != nil {
-			logging.Warn("Failed to parse image metadata",
-				"file", entry.Name(),
-				"error", err)
-			continue
-		}
-
-		// Verify that image data exists
-		tarPath := strings.TrimSuffix(entry.Name(), ".json") + ".tar"
-		if _, err := os.Stat(filepath.Join(s.storageDir, tarPath)); err != nil {
-			logging.Warn("Image data file missing",
-				"file", tarPath,
-				"error", err)
-			continue
-		}
-
-		images = append(images, ref)
-	}
-
-	logging.Debug("Found images in storage",
-		"count", len(images))
-	return images, nil
-}
-
-// CleanExpiredImages removes images that have exceeded their TTL
 func (s *LocalImageStore) CleanExpiredImages() error {
-	now := time.Now().Unix()
-	entries, err := os.ReadDir(s.storageDir)
-	if err != nil {
-		return errors.Wrap(err, errors.ErrStorage, "failed to read storage directory")
+	if s == nil {
+		return fmt.Errorf("store is nil")
+	}
+	if s.ttl <= 0 {
+		return nil // No cleanup needed if TTL is disabled
 	}
 
-	for _, entry := range entries {
-		if entry.IsDir() || !strings.HasSuffix(entry.Name(), ".json") {
-			continue
-		}
+	// First get the list of expired images under read lock
+	s.mu.RLock()
+	var toRemove []ImageReference
+	metadataList, err := s.readMetadata()
+	if err != nil {
+		s.mu.RUnlock()
+		return fmt.Errorf("failed to read metadata: %w", err)
+	}
 
-		data, err := os.ReadFile(filepath.Join(s.storageDir, entry.Name()))
-		if err != nil {
-			logging.Warn("Failed to read image metadata during cleanup",
-				"file", entry.Name(),
-				"error", err)
-			continue
+	now := time.Now().Unix()
+	for _, metadata := range metadataList {
+		if now-metadata.StoredAt >= s.ttl {
+			toRemove = append(toRemove, metadata.ImageReference)
 		}
+	}
+	s.mu.RUnlock()
 
-		var metadata ImageMetadata
-		if err := json.Unmarshal(data, &metadata); err != nil {
-			logging.Warn("Failed to parse image metadata during cleanup",
-				"file", entry.Name(),
-				"error", err)
-			continue
+	// Then remove them one by one
+	var lastErr error
+	for _, ref := range toRemove {
+		if err := s.Remove(ref); err != nil {
+			lastErr = fmt.Errorf("failed to remove expired image: %w", err)
 		}
+	}
 
-		if now-metadata.StoredAt > s.cacheTTL {
-			ref := metadata.ImageReference
-			if err := s.Remove(ref); err != nil {
-				logging.Warn("Failed to remove expired image",
-					"image", fmt.Sprintf("%s/%s:%s", ref.Registry, ref.Repository, ref.Tag),
-					"error", err)
-				continue
-			}
-			logging.Info("Removed expired image",
-				"image", fmt.Sprintf("%s/%s:%s", ref.Registry, ref.Repository, ref.Tag))
-		}
+	return lastErr
+}
+
+// getImagePath returns the full path for an image
+func (s *LocalImageStore) getImagePath(ref ImageReference) string {
+	filename := strings.Replace(ref.String(), "/", "_", -1) + ".tar"
+	return filepath.Join(s.rootDir, filename)
+}
+
+func parseImageFilename(filename string) (ImageReference, error) {
+	// Remove .tar extension
+	name := strings.TrimSuffix(filename, ".tar")
+
+	// Split into parts (previously joined with _)
+	parts := strings.Split(name, "_")
+	if len(parts) < 3 {
+		return ImageReference{}, fmt.Errorf("invalid image filename format")
+	}
+
+	return ImageReference{
+		Registry:   parts[0],
+		Repository: strings.Join(parts[1:len(parts)-1], "/"),
+		Tag:        parts[len(parts)-1],
+	}, nil
+}
+
+func validateReference(ref ImageReference) error {
+	if ref.Registry == "" || ref.Repository == "" || ref.Tag == "" {
+		return fmt.Errorf("invalid image reference: all fields must be non-empty")
 	}
 	return nil
+}
+
+// SetCacheTTL sets the cache time-to-live in seconds
+func (s *LocalImageStore) SetCacheTTL(ttl int) {
+	if s == nil {
+		return
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.ttl = int64(ttl)
 }

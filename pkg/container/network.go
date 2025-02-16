@@ -19,7 +19,17 @@ func (m *LXCManager) configureNetwork(name string, cfg *config.NetworkConfig) er
 	}
 
 	logging.Debug("Configuring network", "container", name)
-	configPath := filepath.Join(m.configPath, name, "network")
+	containerDir := filepath.Join(m.configPath, name)
+	if err := os.MkdirAll(containerDir, 0755); err != nil {
+		return fmt.Errorf("failed to create container directory: %w", err)
+	}
+	configPath := filepath.Join(containerDir, "network.conf")
+
+	// If the file exists, remove it first to avoid any issues
+	if err := os.Remove(configPath); err != nil && !os.IsNotExist(err) {
+		return fmt.Errorf("failed to remove existing network config: %w", err)
+	}
+
 	var lines []string
 
 	// Handle legacy configuration
@@ -37,91 +47,102 @@ func (m *LXCManager) configureNetwork(name string, cfg *config.NetworkConfig) er
 			MTU:       cfg.MTU,
 			MAC:       cfg.MAC,
 		}
-		cfg.Interfaces = append(cfg.Interfaces, legacy)
+		cfg.Interfaces = append([]config.NetworkInterface{legacy}, cfg.Interfaces...)
 	}
 
 	// Configure network isolation if enabled
 	if cfg.Isolated {
 		lines = append(lines, "lxc.net.0.flags = down")
-		logging.Debug("Network isolation enabled", "container", name)
+		return os.WriteFile(configPath, []byte(strings.Join(lines, "\n")+"\n"), 0644)
 	}
 
-	// Configure interfaces
+	// Configure each network interface
 	for i, iface := range cfg.Interfaces {
+		// Skip empty interfaces
+		if iface.Type == "" && iface.Interface == "" && iface.Bridge == "" {
+			continue
+		}
+
+		// Default to veth type if not specified
+		if iface.Type == "" {
+			iface.Type = "veth"
+		}
+
 		prefix := fmt.Sprintf("lxc.net.%d", i)
-		ifaceLines := []string{
-			fmt.Sprintf("%s.type = %s", prefix, iface.Type),
-		}
 
-		if iface.Type == "bridge" {
-			ifaceLines = append(ifaceLines, fmt.Sprintf("%s.link = %s", prefix, iface.Bridge))
-		}
+		// Basic interface configuration
+		lines = append(lines, fmt.Sprintf("%s.type = %s", prefix, iface.Type))
 
+		if iface.Bridge != "" {
+			lines = append(lines, fmt.Sprintf("%s.link = %s", prefix, iface.Bridge))
+		}
 		if iface.Interface != "" {
-			ifaceLines = append(ifaceLines, fmt.Sprintf("%s.name = %s", prefix, iface.Interface))
+			lines = append(lines, fmt.Sprintf("%s.name = %s", prefix, iface.Interface))
 		}
 
+		// Add default flags
+		lines = append(lines, fmt.Sprintf("%s.flags = up", prefix))
+
+		// IP configuration
 		if iface.DHCP {
-			ifaceLines = append(ifaceLines,
-				fmt.Sprintf("%s.ipv4.method = dhcp", prefix),
-				fmt.Sprintf("%s.ipv6.method = dhcp", prefix),
-			)
+			lines = append(lines, fmt.Sprintf("%s.ipv4.method = dhcp", prefix))
+			lines = append(lines, fmt.Sprintf("%s.ipv6.method = dhcp", prefix))
 		} else if iface.IP != "" {
-			ifaceLines = append(ifaceLines, fmt.Sprintf("%s.ipv4.address = %s", prefix, iface.IP))
+			lines = append(lines, fmt.Sprintf("%s.ipv4.address = %s", prefix, iface.IP))
 			if iface.Gateway != "" {
-				ifaceLines = append(ifaceLines, fmt.Sprintf("%s.ipv4.gateway = %s", prefix, iface.Gateway))
+				lines = append(lines, fmt.Sprintf("%s.ipv4.gateway = %s", prefix, iface.Gateway))
 			}
 		}
 
-		// Interface-specific DNS servers
+		// DNS configuration
 		for j, dns := range iface.DNS {
-			ifaceLines = append(ifaceLines, fmt.Sprintf("%s.ipv4.nameserver.%d = %s", prefix, j, dns))
+			lines = append(lines, fmt.Sprintf("%s.ipv4.nameserver.%d = %s", prefix, j, dns))
 		}
 
+		// Additional settings
 		if iface.Hostname != "" {
-			ifaceLines = append(ifaceLines, fmt.Sprintf("%s.hostname = %s", prefix, iface.Hostname))
+			lines = append(lines, fmt.Sprintf("%s.hostname = %s", prefix, iface.Hostname))
 		}
 		if iface.MTU > 0 {
-			ifaceLines = append(ifaceLines, fmt.Sprintf("%s.mtu = %d", prefix, iface.MTU))
+			lines = append(lines, fmt.Sprintf("%s.mtu = %d", prefix, iface.MTU))
 		}
 		if iface.MAC != "" {
-			ifaceLines = append(ifaceLines, fmt.Sprintf("%s.hwaddr = %s", prefix, iface.MAC))
+			lines = append(lines, fmt.Sprintf("%s.hwaddr = %s", prefix, iface.MAC))
 		}
-
-		lines = append(lines, ifaceLines...)
-	}
-
-	// Configure global DNS settings
-	for i, dns := range cfg.DNSServers {
-		lines = append(lines, fmt.Sprintf("lxc.net.dns.%d = %s", i, dns))
-	}
-
-	// Configure search domains
-	if len(cfg.SearchDomains) > 0 {
-		lines = append(lines, fmt.Sprintf("lxc.net.search_domains = %s", strings.Join(cfg.SearchDomains, " ")))
 	}
 
 	// Configure port forwarding
-	for _, pf := range cfg.PortForwards {
-		rule := fmt.Sprintf("lxc.net.port_forward = %s:%d:%d",
-			strings.ToLower(pf.Protocol),
-			pf.Host,
-			pf.Guest,
-		)
-		lines = append(lines, rule)
-		logging.Debug("Adding port forward",
-			"container", name,
-			"protocol", pf.Protocol,
-			"host_port", pf.Host,
-			"guest_port", pf.Guest,
-		)
+	if len(cfg.PortForwards) > 0 {
+		// Get the primary interface's IP (first interface with static IP)
+		var containerIP string
+		for _, iface := range cfg.Interfaces {
+			if !iface.DHCP && iface.IP != "" {
+				containerIP = strings.Split(iface.IP, "/")[0]
+				break
+			}
+		}
+
+		if containerIP == "" {
+			return fmt.Errorf("port forwarding requires at least one interface with static IP")
+		}
+
+		// Add iptables rules for port forwarding
+		for _, pf := range cfg.PortForwards {
+			// Pre-start hook to set up forwarding
+			preStartRule := fmt.Sprintf("lxc.hook.pre-start = iptables -t nat -A PREROUTING -p %s --dport %d -j DNAT --to %s:%d",
+				pf.Protocol, pf.Host, containerIP, pf.Guest)
+			lines = append(lines, preStartRule)
+
+			// Post-stop hook to clean up forwarding
+			postStopRule := fmt.Sprintf("lxc.hook.post-stop = iptables -t nat -D PREROUTING -p %s --dport %d -j DNAT --to %s:%d",
+				pf.Protocol, pf.Host, containerIP, pf.Guest)
+			lines = append(lines, postStopRule)
+		}
 	}
 
-	logging.Debug("Writing network configuration",
-		"container", name,
-		"path", configPath,
-		"lines", len(lines),
-	)
+	if len(lines) == 0 {
+		return nil
+	}
 
 	return os.WriteFile(configPath, []byte(strings.Join(lines, "\n")+"\n"), 0644)
 }
@@ -130,7 +151,7 @@ func (m *LXCManager) configureNetwork(name string, cfg *config.NetworkConfig) er
 func (m *LXCManager) getNetworkConfig(name string) (*config.NetworkConfig, error) {
 	logging.Debug("Reading network configuration", "container", name)
 
-	configPath := filepath.Join(m.configPath, name, "network")
+	configPath := filepath.Join(m.configPath, name, "network", "config")
 	data, err := os.ReadFile(configPath)
 	if err != nil {
 		if os.IsNotExist(err) {

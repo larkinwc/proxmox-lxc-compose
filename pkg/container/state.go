@@ -183,7 +183,7 @@ func (sm *StateManager) saveState(name string, state *State) error {
 		return fmt.Errorf("failed to marshal state: %w", err)
 	}
 
-	if err := os.WriteFile(sm.getStatePath(name), data, 0644); err != nil {
+	if err := os.WriteFile(sm.getStatePath(name), data, 0600); err != nil {
 		return fmt.Errorf("failed to write state file: %w", err)
 	}
 
@@ -231,8 +231,27 @@ func (sm *StateManager) SaveState(state *State) error {
 	if state == nil || state.Name == "" {
 		return fmt.Errorf("invalid state: name is required")
 	}
+
+	// Create state directory if it doesn't exist
+	if err := os.MkdirAll(sm.statePath, 0700); err != nil {
+		return fmt.Errorf("failed to create state directory: %w", err)
+	}
+
 	sm.mu.Lock()
 	defer sm.mu.Unlock()
 	sm.states[state.Name] = state
-	return sm.saveState(state.Name, state)
+
+	// Marshal state to JSON
+	data, err := json.Marshal(state)
+	if err != nil {
+		return fmt.Errorf("failed to marshal state: %w", err)
+	}
+
+	// Write state file with restricted permissions
+	stateFile := sm.getStatePath(state.Name)
+	if err := os.WriteFile(stateFile, data, 0600); err != nil {
+		return fmt.Errorf("failed to write state file: %w", err)
+	}
+
+	return nil
 }

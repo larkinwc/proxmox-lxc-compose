@@ -21,6 +21,9 @@ test-debug:
 test-fails:
 	@$(GOTEST) -v ./... 2>&1 | grep ": unexpected\|: expected" || true
 
+test-short:
+	@$(GOTEST) ./... -short
+
 lint:
 	golangci-lint run
 
@@ -41,6 +44,10 @@ tools:
 .PHONY: run
 run: build
 	./$(BINARY_NAME)
+
+# Run a specific test: make test-one TEST=TestName [PKG=./path/to/package]
+test-one:
+	@$(GOTEST) -v $(if $(PKG),$(PKG),./...) $(if $(TEST),-run "$(TEST)",)
 
 # Generate mocks (if we add them later)
 .PHONY: generate

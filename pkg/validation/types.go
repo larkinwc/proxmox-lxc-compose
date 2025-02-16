@@ -79,10 +79,33 @@ func ValidateSecurityProfile(cfg *SecurityProfile) error {
 
 // isValidCapability checks if a Linux capability is valid
 func isValidCapability(capability string) bool {
-	return validCaps[capability]
+	// Add debug output
+	fmt.Printf("DEBUG: Checking capability: %s\n", capability)
+
+	// First try exact match
+	if validCaps[capability] {
+		return true
+	}
+
+	// Try with CAP_ prefix if not present
+	if !strings.HasPrefix(capability, "CAP_") {
+		withPrefix := "CAP_" + capability
+		fmt.Printf("DEBUG: Checking with CAP_ prefix: %s\n", withPrefix)
+		return validCaps[withPrefix]
+	}
+
+	// Try without CAP_ prefix if present
+	if strings.HasPrefix(capability, "CAP_") {
+		withoutPrefix := strings.TrimPrefix(capability, "CAP_")
+		fmt.Printf("DEBUG: Checking without CAP_ prefix: %s\n", withoutPrefix)
+		return validCaps[withoutPrefix]
+	}
+
+	return false
 }
 
 var validCaps = map[string]bool{
+	// Standard capabilities
 	"CHOWN":            true,
 	"DAC_OVERRIDE":     true,
 	"DAC_READ_SEARCH":  true,
@@ -121,4 +144,44 @@ var validCaps = map[string]bool{
 	"WAKE_ALARM":       true,
 	"BLOCK_SUSPEND":    true,
 	"AUDIT_READ":       true,
+
+	// With CAP_ prefix
+	"CAP_CHOWN":            true,
+	"CAP_DAC_OVERRIDE":     true,
+	"CAP_DAC_READ_SEARCH":  true,
+	"CAP_FOWNER":           true,
+	"CAP_FSETID":           true,
+	"CAP_KILL":             true,
+	"CAP_SETGID":           true,
+	"CAP_SETUID":           true,
+	"CAP_SETPCAP":          true,
+	"CAP_LINUX_IMMUTABLE":  true,
+	"CAP_NET_BIND_SERVICE": true,
+	"CAP_NET_BROADCAST":    true,
+	"CAP_NET_ADMIN":        true,
+	"CAP_NET_RAW":          true,
+	"CAP_IPC_LOCK":         true,
+	"CAP_IPC_OWNER":        true,
+	"CAP_SYS_MODULE":       true,
+	"CAP_SYS_RAWIO":        true,
+	"CAP_SYS_CHROOT":       true,
+	"CAP_SYS_PTRACE":       true,
+	"CAP_SYS_PACCT":        true,
+	"CAP_SYS_ADMIN":        true,
+	"CAP_SYS_BOOT":         true,
+	"CAP_SYS_NICE":         true,
+	"CAP_SYS_RESOURCE":     true,
+	"CAP_SYS_TIME":         true,
+	"CAP_SYS_TTY_CONFIG":   true,
+	"CAP_MKNOD":            true,
+	"CAP_LEASE":            true,
+	"CAP_AUDIT_WRITE":      true,
+	"CAP_AUDIT_CONTROL":    true,
+	"CAP_SETFCAP":          true,
+	"CAP_MAC_OVERRIDE":     true,
+	"CAP_MAC_ADMIN":        true,
+	"CAP_SYSLOG":           true,
+	"CAP_WAKE_ALARM":       true,
+	"CAP_BLOCK_SUSPEND":    true,
+	"CAP_AUDIT_READ":       true,
 }

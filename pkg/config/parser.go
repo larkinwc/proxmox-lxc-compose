@@ -15,13 +15,46 @@ func Load(path string) (*Container, error) {
 		return nil, fmt.Errorf("failed to read config file: %w", err)
 	}
 
+	// First try to parse as a compose config
+	var composeConfig struct {
+		Version  string                `yaml:"version"`
+		Services map[string]*Container `yaml:"services"`
+	}
+
+	if err := yaml.Unmarshal(data, &composeConfig); err != nil {
+		return nil, fmt.Errorf("failed to parse config file: %w", err)
+	}
+
+	if len(composeConfig.Services) > 0 {
+		// Get the "app" container if it exists, otherwise get the first container
+		container, exists := composeConfig.Services["app"]
+		if !exists {
+			// Get the first container
+			for _, c := range composeConfig.Services {
+				container = c
+				break
+			}
+		}
+
+		if container == nil {
+			return nil, fmt.Errorf("invalid configuration: service is empty")
+		}
+
+		if err := validateContainer("app", container); err != nil {
+			return nil, fmt.Errorf("invalid configuration: %w", err)
+		}
+
+		return container, nil
+	}
+
+	// Try to parse as a single container config
 	var container Container
 	if err := yaml.Unmarshal(data, &container); err != nil {
 		return nil, fmt.Errorf("failed to parse config file: %w", err)
 	}
 
-	if err := Validate(&container); err != nil {
-		return nil, err
+	if err := validateContainer("default", &container); err != nil {
+		return nil, fmt.Errorf("invalid configuration: %w", err)
 	}
 
 	return &container, nil
@@ -83,6 +116,7 @@ func Validate(container *Container) error {
 
 	// Validate security configuration
 	if container.Security != nil {
+		fmt.Printf("DEBUG: Validating security config: %+v\n", container.Security)
 		if err := validation.ValidateSecurityProfile(toValidationSecurityProfile(container.Security)); err != nil {
 			return fmt.Errorf("invalid security configuration: %w", err)
 		}

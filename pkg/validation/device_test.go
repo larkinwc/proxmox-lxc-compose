@@ -1,6 +1,11 @@
 package validation
 
-import "testing"
+import (
+	"path/filepath"
+	"testing"
+
+	testing_internal "proxmox-lxc-compose/pkg/internal/testing"
+)
 
 func TestValidateDeviceType(t *testing.T) {
 	tests := []struct {
@@ -41,16 +46,11 @@ func TestValidateDeviceType(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			err := ValidateDeviceType(tt.deviceType)
-			if tt.wantErr {
-				if err == nil {
-					t.Error("expected error, got nil")
-				} else if tt.errContains != "" && !contains(err.Error(), tt.errContains) {
-					t.Errorf("error %q does not contain %q", err.Error(), tt.errContains)
-				}
-				return
+			if (err != nil) != tt.wantErr {
+				t.Errorf("ValidateDeviceType() error = %v, wantErr %v", err, tt.wantErr)
 			}
-			if err != nil {
-				t.Errorf("unexpected error: %v", err)
+			if err != nil && tt.errContains != "" && !testing_internal.Contains(err.Error(), tt.errContains) {
+				t.Errorf("error %q does not contain %q", err.Error(), tt.errContains)
 			}
 		})
 	}
@@ -107,22 +107,23 @@ func TestValidateDeviceName(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			err := ValidateDeviceName(tt.deviceName)
-			if tt.wantErr {
-				if err == nil {
-					t.Error("expected error, got nil")
-				} else if tt.errContains != "" && !contains(err.Error(), tt.errContains) {
-					t.Errorf("error %q does not contain %q", err.Error(), tt.errContains)
-				}
-				return
+			if (err != nil) != tt.wantErr {
+				t.Errorf("ValidateDeviceName() error = %v, wantErr %v", err, tt.wantErr)
 			}
-			if err != nil {
-				t.Errorf("unexpected error: %v", err)
+			if err != nil && tt.errContains != "" && !testing_internal.Contains(err.Error(), tt.errContains) {
+				t.Errorf("error %q does not contain %q", err.Error(), tt.errContains)
 			}
 		})
 	}
 }
 
 func TestValidateDevicePath(t *testing.T) {
+	// Create platform-agnostic paths
+	absPath := filepath.Join(string(filepath.Separator), "dev", "sda")
+	relPath := filepath.Join("dev", "sda")
+	// Use raw string concatenation to prevent normalization
+	dotPath := string(filepath.Separator) + "dev" + string(filepath.Separator) + ".." + string(filepath.Separator) + "sda"
+
 	tests := []struct {
 		name        string
 		path        string
@@ -145,20 +146,20 @@ func TestValidateDevicePath(t *testing.T) {
 		},
 		{
 			name:     "valid absolute path",
-			path:     "/dev/sda",
+			path:     absPath,
 			isSource: true,
 			wantErr:  false,
 		},
 		{
 			name:        "relative path",
-			path:        "dev/sda",
+			path:        relPath,
 			isSource:    true,
 			wantErr:     true,
 			errContains: "must be absolute",
 		},
 		{
 			name:        "path with ..",
-			path:        "/dev/../sda",
+			path:        dotPath,
 			isSource:    true,
 			wantErr:     true,
 			errContains: "must not contain '..'",
@@ -168,16 +169,11 @@ func TestValidateDevicePath(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			err := ValidateDevicePath(tt.path, tt.isSource)
-			if tt.wantErr {
-				if err == nil {
-					t.Error("expected error, got nil")
-				} else if tt.errContains != "" && !contains(err.Error(), tt.errContains) {
-					t.Errorf("error %q does not contain %q", err.Error(), tt.errContains)
-				}
-				return
+			if (err != nil) != tt.wantErr {
+				t.Errorf("ValidateDevicePath() error = %v, wantErr %v", err, tt.wantErr)
 			}
-			if err != nil {
-				t.Errorf("unexpected error: %v", err)
+			if err != nil && tt.errContains != "" && !testing_internal.Contains(err.Error(), tt.errContains) {
+				t.Errorf("error %q does not contain %q", err.Error(), tt.errContains)
 			}
 		})
 	}
@@ -229,22 +225,21 @@ func TestValidateDeviceOptions(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			err := ValidateDeviceOptions(tt.deviceType, tt.options)
-			if tt.wantErr {
-				if err == nil {
-					t.Error("expected error, got nil")
-				} else if tt.errContains != "" && !contains(err.Error(), tt.errContains) {
-					t.Errorf("error %q does not contain %q", err.Error(), tt.errContains)
-				}
-				return
+			if (err != nil) != tt.wantErr {
+				t.Errorf("ValidateDeviceOptions() error = %v, wantErr %v", err, tt.wantErr)
 			}
-			if err != nil {
-				t.Errorf("unexpected error: %v", err)
+			if err != nil && tt.errContains != "" && !testing_internal.Contains(err.Error(), tt.errContains) {
+				t.Errorf("error %q does not contain %q", err.Error(), tt.errContains)
 			}
 		})
 	}
 }
 
 func TestValidateDevice(t *testing.T) {
+	// Create platform-agnostic paths
+	absPath := filepath.Join(string(filepath.Separator), "dev", "sda")
+	relPath := filepath.Join("dev", "sda")
+
 	tests := []struct {
 		name        string
 		deviceName  string
@@ -259,8 +254,8 @@ func TestValidateDevice(t *testing.T) {
 			name:        "valid disk device",
 			deviceName:  "sda",
 			deviceType:  "disk",
-			source:      "/dev/sda",
-			destination: "/dev/sda",
+			source:      absPath,
+			destination: absPath,
 			options:     []string{"ro"},
 			wantErr:     false,
 		},
@@ -268,8 +263,8 @@ func TestValidateDevice(t *testing.T) {
 			name:        "empty device name",
 			deviceName:  "",
 			deviceType:  "disk",
-			source:      "/dev/sda",
-			destination: "/dev/sda",
+			source:      absPath,
+			destination: absPath,
 			wantErr:     true,
 			errContains: "name is required",
 		},
@@ -277,8 +272,8 @@ func TestValidateDevice(t *testing.T) {
 			name:        "invalid device type",
 			deviceName:  "sda",
 			deviceType:  "invalid",
-			source:      "/dev/sda",
-			destination: "/dev/sda",
+			source:      absPath,
+			destination: absPath,
 			wantErr:     true,
 			errContains: "unsupported device type",
 		},
@@ -287,7 +282,7 @@ func TestValidateDevice(t *testing.T) {
 			deviceName:  "sda",
 			deviceType:  "disk",
 			source:      "",
-			destination: "/dev/sda",
+			destination: absPath,
 			wantErr:     true,
 			errContains: "source path is required",
 		},
@@ -295,8 +290,8 @@ func TestValidateDevice(t *testing.T) {
 			name:        "relative source path",
 			deviceName:  "sda",
 			deviceType:  "disk",
-			source:      "dev/sda",
-			destination: "/dev/sda",
+			source:      relPath,
+			destination: absPath,
 			wantErr:     true,
 			errContains: "must be absolute",
 		},
@@ -304,8 +299,8 @@ func TestValidateDevice(t *testing.T) {
 			name:        "invalid options",
 			deviceName:  "sda",
 			deviceType:  "disk",
-			source:      "/dev/sda",
-			destination: "/dev/sda",
+			source:      absPath,
+			destination: absPath,
 			options:     []string{"invalid"},
 			wantErr:     true,
 			errContains: "invalid device option",
@@ -315,16 +310,11 @@ func TestValidateDevice(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			err := ValidateDevice(tt.deviceName, tt.deviceType, tt.source, tt.destination, tt.options)
-			if tt.wantErr {
-				if err == nil {
-					t.Error("expected error, got nil")
-				} else if tt.errContains != "" && !contains(err.Error(), tt.errContains) {
-					t.Errorf("error %q does not contain %q", err.Error(), tt.errContains)
-				}
-				return
+			if (err != nil) != tt.wantErr {
+				t.Errorf("ValidateDevice() error = %v, wantErr %v", err, tt.wantErr)
 			}
-			if err != nil {
-				t.Errorf("unexpected error: %v", err)
+			if err != nil && tt.errContains != "" && !testing_internal.Contains(err.Error(), tt.errContains) {
+				t.Errorf("error %q does not contain %q", err.Error(), tt.errContains)
 			}
 		})
 	}

@@ -86,7 +86,7 @@ func (m *RegistryManager) Push(ctx context.Context, ref ImageReference) error {
 
 		// Load from local cache
 		logging.Debug("Loading image from cache")
-		data, err := m.store.Retrieve(ref)
+		data, err := m.store.Get(ref)
 		if err != nil {
 			return errors.Wrap(err, errors.ErrStorage, "failed to retrieve image from cache")
 		}
@@ -159,7 +159,7 @@ func (m *RegistryManager) Load(_ context.Context, ref ImageReference) error {
 
 	// Load from local cache
 	logging.Debug("Loading image from cache")
-	data, err := m.store.Retrieve(ref)
+	data, err := m.store.Get(ref)
 	if err != nil {
 		return errors.Wrap(err, errors.ErrStorage, "failed to retrieve image from cache")
 	}

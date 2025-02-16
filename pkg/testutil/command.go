@@ -398,6 +398,11 @@ func (m *MockCommandExecutor) SetActualExecution(enabled bool) {
 	m.actualExec = enabled
 }
 
+// AddErrorCommand adds a command that should return an error
+func (m *MockCommandExecutor) AddErrorCommand(cmd string, errMsg string) {
+	m.errorCmds[cmd] = fmt.Errorf(errMsg)
+}
+
 // Command creates a mocked exec.Command
 func (m *MockCommandExecutor) Command(name string, args ...string) *exec.Cmd {
 	cmdStr := name

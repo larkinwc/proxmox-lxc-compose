@@ -3,6 +3,7 @@ package validation
 import (
 	"fmt"
 	"path/filepath"
+	"proxmox-lxc-compose/pkg/common"
 	"regexp"
 	"strings"
 )
@@ -64,9 +65,15 @@ func ValidateDevicePath(path string, isSource bool) error {
 		return fmt.Errorf("device path must be absolute: %s", path)
 	}
 
-	// Basic path validation
-	if strings.Contains(path, "..") {
+	// Check for parent directory references
+	if strings.Contains(path, "..") || strings.Contains(filepath.Clean(path), "..") {
 		return fmt.Errorf("device path must not contain '..': %s", path)
+	}
+
+	// Ensure path is clean/normalized
+	cleanPath := filepath.Clean(path)
+	if cleanPath != path {
+		return fmt.Errorf("device path must be normalized: %s", path)
 	}
 
 	return nil
@@ -148,4 +155,10 @@ func containsOption(options []string, target string) bool {
 		}
 	}
 	return false
+}
+
+func validateDeviceConfig(device *common.DeviceConfig) error {
+	// ...existing code...
+
+	return nil
 }

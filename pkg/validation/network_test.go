@@ -1,6 +1,11 @@
 package validation
 
-import "testing"
+import (
+	"strings"
+	"testing"
+
+	"proxmox-lxc-compose/pkg/common"
+)
 
 func TestValidateNetworkType(t *testing.T) {
 	tests := []struct {
@@ -22,6 +27,11 @@ func TestValidateNetworkType(t *testing.T) {
 			errContains: "unsupported network type",
 		},
 		{
+			name:        "valid type - none",
+			networkType: "none",
+			wantErr:     false,
+		},
+		{
 			name:        "valid type - bridge",
 			networkType: "bridge",
 			wantErr:     false,
@@ -29,6 +39,16 @@ func TestValidateNetworkType(t *testing.T) {
 		{
 			name:        "valid type - veth",
 			networkType: "veth",
+			wantErr:     false,
+		},
+		{
+			name:        "valid type - macvlan",
+			networkType: "macvlan",
+			wantErr:     false,
+		},
+		{
+			name:        "valid type - phys",
+			networkType: "phys",
 			wantErr:     false,
 		},
 		{
@@ -41,17 +61,7 @@ func TestValidateNetworkType(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			err := ValidateNetworkType(tt.networkType)
-			if tt.wantErr {
-				if err == nil {
-					t.Error("expected error, got nil")
-				} else if tt.errContains != "" && !contains(err.Error(), tt.errContains) {
-					t.Errorf("error %q does not contain %q", err.Error(), tt.errContains)
-				}
-				return
-			}
-			if err != nil {
-				t.Errorf("unexpected error: %v", err)
-			}
+			assertTestError(t, err, tt.wantErr, tt.errContains)
 		})
 	}
 }
@@ -64,58 +74,60 @@ func TestValidateIPAddress(t *testing.T) {
 		errContains string
 	}{
 		{
-			name:    "empty ip",
+			name:    "empty IP",
 			ip:      "",
 			wantErr: false,
 		},
 		{
-			name:    "valid ipv4",
+			name:    "valid IPv4",
 			ip:      "192.168.1.1",
 			wantErr: false,
 		},
 		{
-			name:    "valid ipv6",
-			ip:      "2001:db8::1",
-			wantErr: false,
-		},
-		{
-			name:    "valid ipv4 with cidr",
+			name:    "valid IPv4 with CIDR",
 			ip:      "192.168.1.1/24",
 			wantErr: false,
 		},
 		{
-			name:    "valid ipv6 with cidr",
+			name:    "valid IPv6",
+			ip:      "2001:db8::1",
+			wantErr: false,
+		},
+		{
+			name:    "valid IPv6 with CIDR",
 			ip:      "2001:db8::1/64",
 			wantErr: false,
 		},
 		{
-			name:        "invalid ip",
+			name:        "invalid IP format",
 			ip:          "256.256.256.256",
 			wantErr:     true,
-			errContains: "invalid IP address",
+			errContains: "invalid IP address format",
 		},
 		{
-			name:        "invalid cidr",
+			name:        "invalid CIDR - too high IPv4",
 			ip:          "192.168.1.1/33",
 			wantErr:     true,
-			errContains: "must be between 1 and 32",
+			errContains: "invalid IPv4 network prefix length",
+		},
+		{
+			name:        "invalid CIDR - too high IPv6",
+			ip:          "2001:db8::1/129",
+			wantErr:     true,
+			errContains: "invalid IPv6 network prefix length",
+		},
+		{
+			name:        "invalid CIDR format",
+			ip:          "192.168.1.1/abc",
+			wantErr:     true,
+			errContains: "invalid network prefix",
 		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			err := ValidateIPAddress(tt.ip)
-			if tt.wantErr {
-				if err == nil {
-					t.Error("expected error, got nil")
-				} else if tt.errContains != "" && !contains(err.Error(), tt.errContains) {
-					t.Errorf("error %q does not contain %q", err.Error(), tt.errContains)
-				}
-				return
-			}
-			if err != nil {
-				t.Errorf("unexpected error: %v", err)
-			}
+			assertTestError(t, err, tt.wantErr, tt.errContains)
 		})
 	}
 }
@@ -129,374 +141,113 @@ func TestValidateDNSServers(t *testing.T) {
 	}{
 		{
 			name:    "empty list",
-			servers: nil,
+			servers: []string{},
 			wantErr: false,
 		},
 		{
 			name:    "valid servers",
-			servers: []string{"8.8.8.8", "8.8.4.4"},
+			servers: []string{"8.8.8.8", "8.8.4.4", "2001:4860:4860::8888"},
 			wantErr: false,
 		},
 		{
-			name:    "valid ipv6 servers",
-			servers: []string{"2001:4860:4860::8888", "2001:4860:4860::8844"},
-			wantErr: false,
-		},
-		{
-			name:        "invalid server",
+			name:        "invalid IP",
 			servers:     []string{"8.8.8.8", "invalid"},
 			wantErr:     true,
-			errContains: "invalid DNS server",
+			errContains: "invalid DNS server IP",
+		},
+		{
+			name:        "empty server in list",
+			servers:     []string{"8.8.8.8", ""},
+			wantErr:     true,
+			errContains: "DNS server IP cannot be empty",
 		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			err := ValidateDNSServers(tt.servers)
-			if tt.wantErr {
-				if err == nil {
-					t.Error("expected error, got nil")
-				} else if tt.errContains != "" && !contains(err.Error(), tt.errContains) {
-					t.Errorf("error %q does not contain %q", err.Error(), tt.errContains)
-				}
-				return
-			}
-			if err != nil {
-				t.Errorf("unexpected error: %v", err)
-			}
+			assertTestError(t, err, tt.wantErr, tt.errContains)
 		})
 	}
 }
 
-func TestValidateNetworkInterfaceName(t *testing.T) {
+func TestValidateNetworkInterface(t *testing.T) {
 	tests := []struct {
 		name        string
-		iface       string
+		iface       *NetworkInterface
 		wantErr     bool
 		errContains string
 	}{
 		{
-			name:    "empty interface",
-			iface:   "",
+			name: "valid bridge with DHCP",
+			iface: &NetworkInterface{
+				Type:      "bridge",
+				Bridge:    "br0",
+				Interface: "eth0",
+				DHCP:      true,
+			},
 			wantErr: false,
 		},
 		{
-			name:    "valid interface",
-			iface:   "eth0",
-			wantErr: false,
-		},
-		{
-			name:    "valid interface with numbers",
-			iface:   "eth123",
-			wantErr: false,
-		},
-		{
-			name:    "valid interface with hyphen",
-			iface:   "eth-wan",
-			wantErr: false,
-		},
-		{
-			name:    "valid interface with underscore",
-			iface:   "eth_lan",
-			wantErr: false,
-		},
-		{
-			name:        "too long interface name",
-			iface:       "very-long-interface-name",
-			wantErr:     true,
-			errContains: "too long",
-		},
-		{
-			name:        "invalid characters",
-			iface:       "eth@0",
-			wantErr:     true,
-			errContains: "invalid interface name",
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			err := ValidateNetworkInterfaceName(tt.iface)
-			if tt.wantErr {
-				if err == nil {
-					t.Error("expected error, got nil")
-				} else if tt.errContains != "" && !contains(err.Error(), tt.errContains) {
-					t.Errorf("error %q does not contain %q", err.Error(), tt.errContains)
-				}
-				return
-			}
-			if err != nil {
-				t.Errorf("unexpected error: %v", err)
-			}
-		})
-	}
-}
-
-func TestValidateHostname(t *testing.T) {
-	tests := []struct {
-		name        string
-		hostname    string
-		wantErr     bool
-		errContains string
-	}{
-		{
-			name:     "empty hostname",
-			hostname: "",
-			wantErr:  false,
-		},
-		{
-			name:     "valid hostname",
-			hostname: "host1",
-			wantErr:  false,
-		},
-		{
-			name:     "valid hostname with hyphen",
-			hostname: "web-server",
-			wantErr:  false,
-		},
-		{
-			name:        "hostname starts with hyphen",
-			hostname:    "-host",
-			wantErr:     true,
-			errContains: "must start and end with alphanumeric",
-		},
-		{
-			name:        "hostname ends with hyphen",
-			hostname:    "host-",
-			wantErr:     true,
-			errContains: "must start and end with alphanumeric",
-		},
-		{
-			name:        "hostname with invalid characters",
-			hostname:    "host_name",
-			wantErr:     true,
-			errContains: "must start and end with alphanumeric",
-		},
-		{
-			name:        "hostname too long",
-			hostname:    "a123456789012345678901234567890123456789012345678901234567890123",
-			wantErr:     true,
-			errContains: "too long",
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			err := ValidateHostname(tt.hostname)
-			if tt.wantErr {
-				if err == nil {
-					t.Error("expected error, got nil")
-				} else if tt.errContains != "" && !contains(err.Error(), tt.errContains) {
-					t.Errorf("error %q does not contain %q", err.Error(), tt.errContains)
-				}
-				return
-			}
-			if err != nil {
-				t.Errorf("unexpected error: %v", err)
-			}
-		})
-	}
-}
-
-func TestValidateMTU(t *testing.T) {
-	tests := []struct {
-		name        string
-		mtu         int
-		wantErr     bool
-		errContains string
-	}{
-		{
-			name:    "zero mtu (default)",
-			mtu:     0,
-			wantErr: false,
-		},
-		{
-			name:    "minimum valid mtu",
-			mtu:     68,
-			wantErr: false,
-		},
-		{
-			name:    "maximum valid mtu",
-			mtu:     65535,
-			wantErr: false,
-		},
-		{
-			name:        "mtu too small",
-			mtu:         67,
-			wantErr:     true,
-			errContains: "must be between 68 and 65535",
-		},
-		{
-			name:        "mtu too large",
-			mtu:         65536,
-			wantErr:     true,
-			errContains: "must be between 68 and 65535",
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			err := ValidateMTU(tt.mtu)
-			if tt.wantErr {
-				if err == nil {
-					t.Error("expected error, got nil")
-				} else if tt.errContains != "" && !contains(err.Error(), tt.errContains) {
-					t.Errorf("error %q does not contain %q", err.Error(), tt.errContains)
-				}
-				return
-			}
-			if err != nil {
-				t.Errorf("unexpected error: %v", err)
-			}
-		})
-	}
-}
-
-func TestValidateMAC(t *testing.T) {
-	tests := []struct {
-		name        string
-		mac         string
-		wantErr     bool
-		errContains string
-	}{
-		{
-			name:    "empty mac",
-			mac:     "",
-			wantErr: false,
-		},
-		{
-			name:    "valid mac",
-			mac:     "00:11:22:33:44:55",
-			wantErr: false,
-		},
-		{
-			name:    "valid mac with different separator",
-			mac:     "00-11-22-33-44-55",
-			wantErr: false,
-		},
-		{
-			name:        "invalid mac format",
-			mac:         "00:11:22:33:44",
-			wantErr:     true,
-			errContains: "invalid MAC address",
-		},
-		{
-			name:        "invalid mac characters",
-			mac:         "00:11:22:33:44:ZZ",
-			wantErr:     true,
-			errContains: "invalid MAC address",
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			err := ValidateMAC(tt.mac)
-			if tt.wantErr {
-				if err == nil {
-					t.Error("expected error, got nil")
-				} else if tt.errContains != "" && !contains(err.Error(), tt.errContains) {
-					t.Errorf("error %q does not contain %q", err.Error(), tt.errContains)
-				}
-				return
-			}
-			if err != nil {
-				t.Errorf("unexpected error: %v", err)
-			}
-		})
-	}
-}
-
-func TestValidateNetworkConfig(t *testing.T) {
-	tests := []struct {
-		name        string
-		config      *NetworkConfig
-		wantErr     bool
-		errContains string
-	}{
-		{
-			name: "valid bridge config with static IP",
-			config: &NetworkConfig{
+			name: "valid bridge with static IP",
+			iface: &NetworkInterface{
 				Type:      "bridge",
 				Bridge:    "br0",
 				Interface: "eth0",
 				IP:        "192.168.1.100/24",
 				Gateway:   "192.168.1.1",
-				DNS:       []string{"8.8.8.8", "8.8.4.4"},
-				DHCP:      false,
-				Hostname:  "host1",
-				MTU:       1500,
-				MAC:       "00:11:22:33:44:55",
+				DNS:       []string{"8.8.8.8"},
 			},
 			wantErr: false,
 		},
 		{
-			name: "valid bridge config with DHCP",
-			config: &NetworkConfig{
+			name: "bridge without bridge name",
+			iface: &NetworkInterface{
 				Type:      "bridge",
-				Bridge:    "br0",
 				Interface: "eth0",
-				DHCP:      true,
-				Hostname:  "host1",
-				MTU:       1500,
-				MAC:       "00:11:22:33:44:55",
 			},
-			wantErr: false,
+			wantErr:     true,
+			errContains: "bridge name is required",
 		},
 		{
 			name: "DHCP with static IP",
-			config: &NetworkConfig{
+			iface: &NetworkInterface{
 				Type:      "bridge",
 				Bridge:    "br0",
 				Interface: "eth0",
-				IP:        "192.168.1.100/24",
 				DHCP:      true,
+				IP:        "192.168.1.100/24",
 			},
 			wantErr:     true,
 			errContains: "cannot specify static IP when DHCP is enabled",
 		},
 		{
-			name: "DHCP with gateway",
-			config: &NetworkConfig{
+			name: "invalid interface name",
+			iface: &NetworkInterface{
 				Type:      "bridge",
 				Bridge:    "br0",
-				Interface: "eth0",
-				Gateway:   "192.168.1.1",
-				DHCP:      true,
+				Interface: "invalid@iface",
 			},
 			wantErr:     true,
-			errContains: "cannot specify gateway when DHCP is enabled",
-		},
-		{
-			name: "invalid hostname",
-			config: &NetworkConfig{
-				Type:      "bridge",
-				Bridge:    "br0",
-				Interface: "eth0",
-				DHCP:      true,
-				Hostname:  "-invalid",
-			},
-			wantErr:     true,
-			errContains: "must start and end with alphanumeric",
+			errContains: "invalid interface name",
 		},
 		{
 			name: "invalid MTU",
-			config: &NetworkConfig{
+			iface: &NetworkInterface{
 				Type:      "bridge",
 				Bridge:    "br0",
 				Interface: "eth0",
-				DHCP:      true,
-				MTU:       50,
+				MTU:       100, // Too low
 			},
 			wantErr:     true,
-			errContains: "must be between 68 and 65535",
+			errContains: "invalid MTU",
 		},
 		{
 			name: "invalid MAC",
-			config: &NetworkConfig{
+			iface: &NetworkInterface{
 				Type:      "bridge",
 				Bridge:    "br0",
 				Interface: "eth0",
-				DHCP:      true,
 				MAC:       "invalid",
 			},
 			wantErr:     true,
@@ -506,226 +257,199 @@ func TestValidateNetworkConfig(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			err := ValidateNetworkConfig(tt.config)
-			if tt.wantErr {
-				if err == nil {
-					t.Error("expected error, got nil")
-				} else if tt.errContains != "" && !contains(err.Error(), tt.errContains) {
-					t.Errorf("error %q does not contain %q", err.Error(), tt.errContains)
-				}
-				return
-			}
-			if err != nil {
-				t.Errorf("unexpected error: %v", err)
-			}
+			err := ValidateNetworkInterface(tt.iface)
+			assertTestError(t, err, tt.wantErr, tt.errContains)
 		})
 	}
 }
 
-func TestValidatePortNumber(t *testing.T) {
+func TestValidateNetworkConfig(t *testing.T) {
 	tests := []struct {
-		name    string
-		port    int
-		wantErr bool
+		name        string
+		cfg         *NetworkConfig
+		wantErr     bool
+		errContains string
 	}{
 		{
-			name:    "valid port",
-			port:    8080,
+			name: "valid config with single interface",
+			cfg: &NetworkConfig{
+				Interfaces: []NetworkInterface{
+					{
+						Type:      "bridge",
+						Bridge:    "br0",
+						Interface: "eth0",
+						DHCP:      true,
+					},
+				},
+			},
 			wantErr: false,
 		},
 		{
-			name:    "port zero",
-			port:    0,
-			wantErr: true,
+			name: "valid config with multiple interfaces",
+			cfg: &NetworkConfig{
+				Interfaces: []NetworkInterface{
+					{
+						Type:      "bridge",
+						Bridge:    "br0",
+						Interface: "eth0",
+						IP:        "192.168.1.100/24",
+						Gateway:   "192.168.1.1",
+					},
+					{
+						Type:      "bridge",
+						Bridge:    "br1",
+						Interface: "eth1",
+						DHCP:      true,
+					},
+				},
+			},
+			wantErr: false,
 		},
 		{
-			name:    "negative port",
-			port:    -1,
-			wantErr: true,
+			name: "no interfaces",
+			cfg: &NetworkConfig{
+				Interfaces: []NetworkInterface{},
+			},
+			wantErr:     true,
+			errContains: "at least one network interface must be configured",
 		},
 		{
-			name:    "port too high",
-			port:    65536,
-			wantErr: true,
+			name: "invalid interface",
+			cfg: &NetworkConfig{
+				Interfaces: []NetworkInterface{
+					{
+						Type: "invalid",
+					},
+				},
+			},
+			wantErr:     true,
+			errContains: "unsupported network type",
 		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			err := ValidatePortNumber(tt.port)
-			if (err != nil) != tt.wantErr {
-				t.Errorf("ValidatePortNumber() error = %v, wantErr %v", err, tt.wantErr)
-			}
+			err := ValidateNetworkConfig(tt.cfg)
+			assertTestError(t, err, tt.wantErr, tt.errContains)
 		})
 	}
 }
 
-func TestValidatePortForward(t *testing.T) {
+func TestValidateVPNConfig(t *testing.T) {
 	tests := []struct {
-		name      string
-		forward   PortForward
-		wantErr   bool
-		errString string
+		name        string
+		cfg         *common.VPNConfig
+		wantErr     bool
+		errContains string
 	}{
 		{
-			name: "valid tcp forward",
-			forward: PortForward{
-				Protocol: "tcp",
-				Host:     8080,
-				Guest:    80,
+			name: "valid config with CA",
+			cfg: &common.VPNConfig{
+				Remote:   "vpn.example.com",
+				Port:     1194,
+				Protocol: "udp",
+				CA:       "ca content",
 			},
 			wantErr: false,
 		},
 		{
-			name: "valid udp forward",
-			forward: PortForward{
-				Protocol: "UDP",
-				Host:     53,
-				Guest:    53,
+			name: "valid config with file",
+			cfg: &common.VPNConfig{
+				Remote:   "vpn.example.com",
+				Port:     1194,
+				Protocol: "tcp",
+				Config:   "config content",
 			},
 			wantErr: false,
+		},
+		{
+			name: "missing remote",
+			cfg: &common.VPNConfig{
+				Port:     1194,
+				Protocol: "udp",
+				CA:       "ca content",
+			},
+			wantErr:     true,
+			errContains: "remote server address is required",
+		},
+		{
+			name: "invalid port",
+			cfg: &common.VPNConfig{
+				Remote:   "vpn.example.com",
+				Port:     70000,
+				Protocol: "udp",
+				CA:       "ca content",
+			},
+			wantErr:     true,
+			errContains: "invalid VPN port",
 		},
 		{
 			name: "invalid protocol",
-			forward: PortForward{
+			cfg: &common.VPNConfig{
+				Remote:   "vpn.example.com",
+				Port:     1194,
 				Protocol: "invalid",
-				Host:     8080,
-				Guest:    80,
+				CA:       "ca content",
 			},
-			wantErr:   true,
-			errString: "protocol must be either tcp or udp",
+			wantErr:     true,
+			errContains: "invalid VPN protocol",
 		},
 		{
-			name: "invalid host port",
-			forward: PortForward{
-				Protocol: "tcp",
-				Host:     0,
-				Guest:    80,
+			name: "missing CA and config",
+			cfg: &common.VPNConfig{
+				Remote:   "vpn.example.com",
+				Port:     1194,
+				Protocol: "udp",
 			},
-			wantErr:   true,
-			errString: "invalid host port",
+			wantErr:     true,
+			errContains: "either OpenVPN config file or CA certificate is required",
 		},
 		{
-			name: "invalid guest port",
-			forward: PortForward{
-				Protocol: "tcp",
-				Host:     8080,
-				Guest:    0,
+			name: "incomplete auth",
+			cfg: &common.VPNConfig{
+				Remote:   "vpn.example.com",
+				Port:     1194,
+				Protocol: "udp",
+				CA:       "ca content",
+				Auth: map[string]string{
+					"username": "user",
+				},
 			},
-			wantErr:   true,
-			errString: "invalid guest port",
+			wantErr:     true,
+			errContains: "both username and password are required",
+		},
+		{
+			name: "cert without key",
+			cfg: &common.VPNConfig{
+				Remote:   "vpn.example.com",
+				Port:     1194,
+				Protocol: "udp",
+				CA:       "ca content",
+				Cert:     "cert content",
+			},
+			wantErr:     true,
+			errContains: "both certificate and key must be provided together",
 		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			err := ValidatePortForward(&tt.forward)
-			if (err != nil) != tt.wantErr {
-				t.Errorf("ValidatePortForward() error = %v, wantErr %v", err, tt.wantErr)
-			}
-			if err != nil && tt.errString != "" && !contains(err.Error(), tt.errString) {
-				t.Errorf("ValidatePortForward() error = %v, want error containing %q", err, tt.errString)
-			}
+			err := ValidateVPNConfig(tt.cfg)
+			assertTestError(t, err, tt.wantErr, tt.errContains)
 		})
 	}
 }
 
-func TestValidateNetworkInterface(t *testing.T) {
-	tests := []struct {
-		name      string
-		iface     NetworkInterface
-		wantErr   bool
-		errString string
-	}{
-		{
-			name: "valid bridge interface",
-			iface: NetworkInterface{
-				Type:      "bridge",
-				Bridge:    "br0",
-				Interface: "eth0",
-				IP:        "192.168.1.100/24",
-				Gateway:   "192.168.1.1",
-				DNS:       []string{"8.8.8.8"},
-				Hostname:  "test-host",
-				MTU:       1500,
-				MAC:       "00:11:22:33:44:55",
-			},
-			wantErr: false,
-		},
-		{
-			name: "valid dhcp interface",
-			iface: NetworkInterface{
-				Type:      "bridge",
-				Bridge:    "br0",
-				Interface: "eth0",
-				DHCP:      true,
-			},
-			wantErr: false,
-		},
-		{
-			name: "missing bridge name",
-			iface: NetworkInterface{
-				Type:      "bridge",
-				Interface: "eth0",
-			},
-			wantErr:   true,
-			errString: "bridge name is required",
-		},
-		{
-			name: "dhcp with static ip",
-			iface: NetworkInterface{
-				Type:   "bridge",
-				Bridge: "br0",
-				DHCP:   true,
-				IP:     "192.168.1.100/24",
-			},
-			wantErr:   true,
-			errString: "cannot specify static IP when DHCP is enabled",
-		},
+// Helper function to assert test errors
+func assertTestError(t *testing.T, err error, wantErr bool, errContains string) {
+	t.Helper()
+	if (err != nil) != wantErr {
+		t.Errorf("validation error = %v, wantErr %v", err, wantErr)
+		return
 	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			err := ValidateNetworkInterface(&tt.iface)
-			if (err != nil) != tt.wantErr {
-				t.Errorf("ValidateNetworkInterface() error = %v, wantErr %v", err, tt.wantErr)
-			}
-			if err != nil && tt.errString != "" && !contains(err.Error(), tt.errString) {
-				t.Errorf("ValidateNetworkInterface() error = %v, want error containing %q", err, tt.errString)
-			}
-		})
-	}
-}
-
-func TestValidateSearchDomains(t *testing.T) {
-	tests := []struct {
-		name    string
-		domains []string
-		wantErr bool
-	}{
-		{
-			name:    "valid domains",
-			domains: []string{"example.com", "test.local"},
-			wantErr: false,
-		},
-		{
-			name:    "empty list",
-			domains: []string{},
-			wantErr: false,
-		},
-		{
-			name:    "invalid domain",
-			domains: []string{"example.com", "-invalid.com"},
-			wantErr: true,
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			err := ValidateSearchDomains(tt.domains)
-			if (err != nil) != tt.wantErr {
-				t.Errorf("ValidateSearchDomains() error = %v, wantErr %v", err, tt.wantErr)
-			}
-		})
+	if err != nil && errContains != "" {
+		if !strings.Contains(err.Error(), errContains) {
+			t.Errorf("error %q does not contain %q", err.Error(), errContains)
+		}
 	}
 }

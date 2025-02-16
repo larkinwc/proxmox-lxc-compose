@@ -1,0 +1,33 @@
+version: "1.0"
+services:
+  test-container:
+    image: "ubuntu:20.04"
+    storage:
+      root: "10GB"
+    network:
+      type: "bridge"
+      bridge: "vmbr0"
+      ip: "192.168.1.100/24"
+      gateway: "192.168.1.1"
+    security:
+      privileged: false
+  app:
+    image: ubuntu:20.04
+    network:
+      type: bridge
+      bridge: lxcbr0
+      interface: eth0
+      ip: 10.0.3.100/24
+      gateway: 10.0.3.1
+      dns:
+        - 8.8.8.8
+        - 8.8.4.4
+    security:
+      isolation: strict
+      capabilities:
+        - NET_ADMIN
+        - SYS_TIME
+    storage:
+      root: 10G
+      backend: dir
+      automount: true

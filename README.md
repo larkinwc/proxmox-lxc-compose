@@ -58,6 +58,21 @@ The main purpose of the CLI is to read a lxc-compose.yml file and use it to crea
   - Automatic cache cleanup
   - Push/pull from OCI registries
   - Local image storage and retrieval
+- Container networking features
+  - Multiple network interfaces
+    - Support for bridge, veth, macvlan, and physical interfaces
+    - DHCP and static IP configuration
+    - Interface-specific DNS settings
+    - Custom MTU and MAC address configuration
+  - Advanced DNS configuration
+    - Per-interface DNS servers
+    - Search domain support
+  - Port forwarding
+    - TCP/UDP port mapping
+    - Automatic iptables rule management
+  - Network isolation
+    - Container network isolation
+    - Interface-level network control
 - Testing
   - Unit tests for state management
   - Unit tests for configuration parsing

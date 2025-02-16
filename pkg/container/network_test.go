@@ -5,8 +5,9 @@ import (
 	"path/filepath"
 	"testing"
 
-	"proxmox-lxc-compose/pkg/config"
+	"proxmox-lxc-compose/pkg/common"
 	"proxmox-lxc-compose/pkg/container"
+	"proxmox-lxc-compose/pkg/internal/mock"
 	testing_internal "proxmox-lxc-compose/pkg/internal/testing"
 )
 
@@ -14,26 +15,31 @@ func TestConfigureNetwork(t *testing.T) {
 	dir, cleanup := testing_internal.TempDir(t)
 	defer cleanup()
 
+	// Set required environment variable for mock
+	os.Setenv("CONTAINER_CONFIG_PATH", dir)
+	defer os.Unsetenv("CONTAINER_CONFIG_PATH")
+
 	// Create test container directory
 	containerName := "test-container"
 	containerDir := filepath.Join(dir, containerName)
 	err := os.MkdirAll(containerDir, 0755)
 	testing_internal.AssertNoError(t, err)
 
-	// Create manager
-	manager, err := container.NewLXCManager(dir)
-	testing_internal.AssertNoError(t, err)
+	// Setup mock command
+	mockCmd, mockCleanup := mock.SetupMockCommand(&container.ExecCommand)
+	defer mockCleanup()
+	mockCmd.SetDebug(true)
 
 	tests := []struct {
 		name    string
-		config  *config.NetworkConfig
+		config  *common.NetworkConfig
 		wantErr bool
 		verify  func(t *testing.T, configPath string)
 	}{
 		{
 			name: "DHCP configuration",
-			config: &config.NetworkConfig{
-				Type:      "bridge",
+			config: &common.NetworkConfig{
+				Type:      "veth",
 				Bridge:    "br0",
 				Interface: "eth0",
 				DHCP:      true,
@@ -47,7 +53,7 @@ func TestConfigureNetwork(t *testing.T) {
 				content := string(data)
 
 				// Verify DHCP settings
-				testing_internal.AssertContains(t, content, "lxc.net.0.type = bridge")
+				testing_internal.AssertContains(t, content, "lxc.net.0.type = veth")
 				testing_internal.AssertContains(t, content, "lxc.net.0.link = br0")
 				testing_internal.AssertContains(t, content, "lxc.net.0.name = eth0")
 				testing_internal.AssertContains(t, content, "lxc.net.0.ipv4.method = dhcp")
@@ -59,8 +65,8 @@ func TestConfigureNetwork(t *testing.T) {
 		},
 		{
 			name: "static IP configuration",
-			config: &config.NetworkConfig{
-				Type:      "bridge",
+			config: &common.NetworkConfig{
+				Type:      "veth",
 				Bridge:    "br0",
 				Interface: "eth0",
 				IP:        "192.168.1.100/24",
@@ -76,7 +82,7 @@ func TestConfigureNetwork(t *testing.T) {
 				content := string(data)
 
 				// Verify static IP settings
-				testing_internal.AssertContains(t, content, "lxc.net.0.type = bridge")
+				testing_internal.AssertContains(t, content, "lxc.net.0.type = veth")
 				testing_internal.AssertContains(t, content, "lxc.net.0.link = br0")
 				testing_internal.AssertContains(t, content, "lxc.net.0.name = eth0")
 				testing_internal.AssertContains(t, content, "lxc.net.0.ipv4.address = 192.168.1.100/24")
@@ -98,18 +104,122 @@ func TestConfigureNetwork(t *testing.T) {
 				}
 			},
 		},
+		{
+			name: "multiple interfaces configuration",
+			config: &common.NetworkConfig{
+				Interfaces: []common.NetworkInterface{
+					{
+						Type:      "veth",
+						Bridge:    "br0",
+						Interface: "eth0",
+						DHCP:      true,
+						MTU:       1500,
+					},
+					{
+						Type:      "veth",
+						Bridge:    "br1",
+						Interface: "eth1",
+						IP:        "10.0.0.100/24",
+						Gateway:   "10.0.0.1",
+						DNS:       []string{"1.1.1.1"},
+						MTU:       1500,
+					},
+				},
+			},
+			verify: func(t *testing.T, configPath string) {
+				data, err := os.ReadFile(configPath)
+				testing_internal.AssertNoError(t, err)
+				content := string(data)
+
+				// First interface
+				testing_internal.AssertContains(t, content, "lxc.net.0.type = veth")
+				testing_internal.AssertContains(t, content, "lxc.net.0.link = br0")
+				testing_internal.AssertContains(t, content, "lxc.net.0.name = eth0")
+				testing_internal.AssertContains(t, content, "lxc.net.0.ipv4.method = dhcp")
+				testing_internal.AssertContains(t, content, "lxc.net.0.mtu = 1500")
+
+				// Second interface
+				testing_internal.AssertContains(t, content, "lxc.net.1.type = veth")
+				testing_internal.AssertContains(t, content, "lxc.net.1.link = br1")
+				testing_internal.AssertContains(t, content, "lxc.net.1.name = eth1")
+				testing_internal.AssertContains(t, content, "lxc.net.1.ipv4.address = 10.0.0.100/24")
+				testing_internal.AssertContains(t, content, "lxc.net.1.ipv4.gateway = 10.0.0.1")
+				testing_internal.AssertContains(t, content, "lxc.net.1.ipv4.nameserver.0 = 1.1.1.1")
+				testing_internal.AssertContains(t, content, "lxc.net.1.mtu = 1500")
+			},
+		},
+		{
+			name: "network with port forwarding",
+			config: &common.NetworkConfig{
+				Interfaces: []common.NetworkInterface{
+					{
+						Type:      "veth",
+						Bridge:    "br0",
+						Interface: "eth0",
+						IP:        "192.168.1.100/24",
+					},
+				},
+				PortForwards: []common.PortForward{
+					{
+						Protocol: "tcp",
+						Host:     80,
+						Guest:    8080,
+					},
+					{
+						Protocol: "udp",
+						Host:     53,
+						Guest:    53,
+					},
+				},
+			},
+			verify: func(t *testing.T, configPath string) {
+				data, err := os.ReadFile(configPath)
+				testing_internal.AssertNoError(t, err)
+				content := string(data)
+
+				// Basic network config
+				testing_internal.AssertContains(t, content, "lxc.net.0.type = veth")
+				testing_internal.AssertContains(t, content, "lxc.net.0.link = br0")
+				testing_internal.AssertContains(t, content, "lxc.net.0.name = eth0")
+				testing_internal.AssertContains(t, content, "lxc.net.0.ipv4.address = 192.168.1.100/24")
+
+				// Port forwards
+				testing_internal.AssertContains(t, content, "lxc.hook.pre-start = iptables -t nat -A PREROUTING -p tcp --dport 80 -j DNAT --to 192.168.1.100:8080")
+				testing_internal.AssertContains(t, content, "lxc.hook.pre-start = iptables -t nat -A PREROUTING -p udp --dport 53 -j DNAT --to 192.168.1.100:53")
+				testing_internal.AssertContains(t, content, "lxc.hook.post-stop = iptables -t nat -D PREROUTING -p tcp --dport 80 -j DNAT --to 192.168.1.100:8080")
+				testing_internal.AssertContains(t, content, "lxc.hook.post-stop = iptables -t nat -D PREROUTING -p udp --dport 53 -j DNAT --to 192.168.1.100:53")
+			},
+		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			configPath := filepath.Join(containerDir, "network")
-			os.Remove(configPath) // Clean up from previous test
+			// Clean up any existing container and state
+			_ = os.RemoveAll(containerDir)
+			err := os.MkdirAll(containerDir, 0755)
+			testing_internal.AssertNoError(t, err)
 
-			// Create and configure container with network config
-			containerCfg := &config.Container{
+			// Clean up state directory
+			stateDir := filepath.Join(dir, "state")
+			_ = os.RemoveAll(stateDir)
+			err = os.MkdirAll(stateDir, 0755)
+			testing_internal.AssertNoError(t, err)
+
+			// Reset mock state
+			mockCmd.RemoveContainer(containerName)
+
+			// Create new manager for each test to ensure clean state
+			manager, err := container.NewLXCManager(dir)
+			testing_internal.AssertNoError(t, err)
+
+			configPath := filepath.Join(containerDir, "network.conf")
+			_ = os.Remove(configPath) // Clean up from previous test
+
+			// Create container with network config
+			containerCfg := &common.Container{
 				Network: tt.config,
 			}
-			err := manager.Create(containerName, containerCfg)
+			err = manager.Create(containerName, containerCfg)
 			if tt.wantErr {
 				testing_internal.AssertError(t, err)
 				return
@@ -133,6 +243,16 @@ func TestGetContainerWithNetwork(t *testing.T) {
 	err := os.MkdirAll(containerDir, 0755)
 	testing_internal.AssertNoError(t, err)
 
+	// Setup mock command
+	mockCmd := mock.NewCommandState()
+	mockCmd.SetDebug(true)
+
+	// Add test container
+	err = mockCmd.AddContainer(containerName, "STOPPED")
+	if err != nil {
+		t.Fatalf("Failed to add test container: %v", err)
+	}
+
 	// Create manager
 	manager, err := container.NewLXCManager(dir)
 	testing_internal.AssertNoError(t, err)
@@ -140,13 +260,13 @@ func TestGetContainerWithNetwork(t *testing.T) {
 	// Test configurations
 	tests := []struct {
 		name    string
-		config  *config.NetworkConfig
+		config  *common.NetworkConfig
 		wantErr bool
 	}{
 		{
 			name: "DHCP configuration",
-			config: &config.NetworkConfig{
-				Type:      "bridge",
+			config: &common.NetworkConfig{
+				Type:      "veth",
 				Bridge:    "br0",
 				Interface: "eth0",
 				DHCP:      true,
@@ -157,8 +277,8 @@ func TestGetContainerWithNetwork(t *testing.T) {
 		},
 		{
 			name: "static IP configuration",
-			config: &config.NetworkConfig{
-				Type:      "bridge",
+			config: &common.NetworkConfig{
+				Type:      "veth",
 				Bridge:    "br0",
 				Interface: "eth0",
 				IP:        "192.168.1.100/24",
@@ -177,11 +297,31 @@ func TestGetContainerWithNetwork(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
+			// Clean up any existing container first
+			_ = manager.Remove(containerName)
+			_ = os.RemoveAll(containerDir)
+			err := os.MkdirAll(containerDir, 0755)
+			testing_internal.AssertNoError(t, err)
+
+			// Clean up state directory
+			stateDir := filepath.Join(dir, "state")
+			_ = os.RemoveAll(stateDir)
+			err = os.MkdirAll(stateDir, 0755)
+			testing_internal.AssertNoError(t, err)
+
+			// Reset mock state
+			mockCmd.RemoveContainer(containerName)
+			mockCmd.AddContainer(containerName, "STOPPED")
+
+			// Create new manager for each test to ensure clean state
+			manager, err = container.NewLXCManager(dir)
+			testing_internal.AssertNoError(t, err)
+
 			// Create container with network config
-			containerCfg := &config.Container{
+			containerCfg := &common.Container{
 				Network: tt.config,
 			}
-			err := manager.Create(containerName, containerCfg)
+			err = manager.Create(containerName, containerCfg)
 			testing_internal.AssertNoError(t, err)
 
 			// Get container and verify network config
@@ -216,6 +356,125 @@ func TestGetContainerWithNetwork(t *testing.T) {
 				for i, dns := range tt.config.DNS {
 					testing_internal.AssertEqual(t, dns, cfg.DNS[i])
 				}
+			}
+		})
+	}
+}
+
+// TestBasicNetworkConfiguration tests the basic network configuration functionality
+// without relying on CLI commands
+func TestBasicNetworkConfiguration(t *testing.T) {
+	dir, cleanup := testing_internal.TempDir(t)
+	defer cleanup()
+
+	containerName := "test-network"
+	containerDir := filepath.Join(dir, containerName)
+	err := os.MkdirAll(containerDir, 0755)
+	testing_internal.AssertNoError(t, err)
+
+	// Setup mock command
+	mockCmd := mock.NewCommandState()
+	mockCmd.SetDebug(true)
+
+	// Add test container
+	err = mockCmd.AddContainer(containerName, "STOPPED")
+	if err != nil {
+		t.Fatalf("Failed to add test container: %v", err)
+	}
+
+	// Create manager
+	manager, err := container.NewLXCManager(dir)
+	testing_internal.AssertNoError(t, err)
+
+	tests := []struct {
+		name    string
+		config  *common.NetworkConfig
+		wantErr bool
+		verify  func(t *testing.T, configPath string)
+	}{
+		{
+			name: "basic_dhcp_config",
+			config: &common.NetworkConfig{
+				Type:      "veth",
+				Bridge:    "br0",
+				Interface: "eth0",
+				DHCP:      true,
+				Hostname:  "test-host",
+			},
+			wantErr: false,
+			verify: func(t *testing.T, configPath string) {
+				content, err := os.ReadFile(configPath)
+				testing_internal.AssertNoError(t, err)
+				testing_internal.AssertContains(t, string(content), "lxc.net.0.type = veth")
+				testing_internal.AssertContains(t, string(content), "lxc.net.0.link = br0")
+				testing_internal.AssertContains(t, string(content), "lxc.net.0.flags = up")
+			},
+		},
+		{
+			name: "static_ip_config",
+			config: &common.NetworkConfig{
+				Type:      "veth",
+				Bridge:    "br0",
+				Interface: "eth0",
+				IP:        "192.168.1.100/24",
+				Gateway:   "192.168.1.1",
+				DNS:       []string{"8.8.8.8"},
+			},
+			wantErr: false,
+			verify: func(t *testing.T, configPath string) {
+				content, err := os.ReadFile(configPath)
+				testing_internal.AssertNoError(t, err)
+				testing_internal.AssertContains(t, string(content), "lxc.net.0.ipv4.address = 192.168.1.100/24")
+				testing_internal.AssertContains(t, string(content), "lxc.net.0.ipv4.gateway = 192.168.1.1")
+			},
+		},
+		{
+			name: "invalid_interface",
+			config: &common.NetworkConfig{
+				Type:      "invalid",
+				Interface: "eth0",
+			},
+			wantErr: true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Clean up any existing container first
+			_ = manager.Remove(containerName)
+			_ = os.RemoveAll(containerDir)
+			err := os.MkdirAll(containerDir, 0755)
+			testing_internal.AssertNoError(t, err)
+
+			// Clean up state directory
+			stateDir := filepath.Join(dir, "state")
+			_ = os.RemoveAll(stateDir)
+			err = os.MkdirAll(stateDir, 0755)
+			testing_internal.AssertNoError(t, err)
+
+			// Reset mock state
+			mockCmd.RemoveContainer(containerName)
+			mockCmd.AddContainer(containerName, "STOPPED")
+
+			// Create new manager for each test to ensure clean state
+			manager, err = container.NewLXCManager(dir)
+			testing_internal.AssertNoError(t, err)
+
+			configPath := filepath.Join(containerDir, "network.conf")
+			_ = os.Remove(configPath) // Clean up from previous test
+
+			containerCfg := &common.Container{
+				Network: tt.config,
+			}
+			err = manager.Create(containerName, containerCfg)
+			if tt.wantErr {
+				testing_internal.AssertError(t, err)
+				return
+			}
+			testing_internal.AssertNoError(t, err)
+
+			if tt.verify != nil {
+				tt.verify(t, configPath)
 			}
 		})
 	}

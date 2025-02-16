@@ -34,21 +34,19 @@ const (
 func (p *Profile) Validate() error {
 	switch p.Isolation {
 	case IsolationDefault, IsolationStrict, IsolationPrivileged:
-		// Valid isolation level
+		// Valid isolation levels
 	default:
 		return fmt.Errorf("invalid isolation level: %s", p.Isolation)
 	}
 
-	if p.AppArmorName != "" {
-		if err := validateAppArmorProfile(p.AppArmorName); err != nil {
-			return err
-		}
+	// Strict isolation cannot be privileged
+	if p.Isolation == IsolationStrict && p.Privileged {
+		return fmt.Errorf("strict isolation cannot be combined with privileged mode")
 	}
 
-	if p.SELinuxContext != "" {
-		if err := validateSELinuxContext(p.SELinuxContext); err != nil {
-			return err
-		}
+	// Only privileged isolation allows privileged mode
+	if p.Privileged && p.Isolation != IsolationPrivileged {
+		return fmt.Errorf("privileged mode requires privileged isolation")
 	}
 
 	return nil

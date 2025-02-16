@@ -63,18 +63,17 @@ func (m *LXCManager) FollowLogs(name string, w io.Writer) error {
 // followLogs returns a ReadCloser that follows the log output
 func (m *LXCManager) followLogs(name string, file io.ReadCloser, _ LogOptions) (io.ReadCloser, error) {
 	// Use lxc-attach to tail the logs
-	cmd := execCommand("lxc-attach", "-n", name, "--", "tail", "-f", "/var/log/console.log")
+	logPath := filepath.Join(m.configPath, name, "console.log")
+	cmd := ExecCommand("lxc-attach", "-n", name, "--", "tail", "-f", logPath)
 	stdout, err := cmd.StdoutPipe()
 	if err != nil {
 		file.Close()
 		return nil, fmt.Errorf("failed to get stdout pipe: %w", err)
 	}
-
 	if err := cmd.Start(); err != nil {
 		file.Close()
 		return nil, fmt.Errorf("failed to start log following: %w", err)
 	}
-
 	return &logReader{
 		cmd:    cmd,
 		stdout: stdout,
@@ -115,7 +114,7 @@ func (m *LXCManager) filterLogs(r io.Reader, opts LogOptions) (io.Reader, error)
 		lines = lines[len(lines)-opts.Tail:]
 	}
 
-	return strings.NewReader(strings.Join(lines, "\n") + "\n"), nil
+	return strings.NewReader(strings.Join(lines, "\n")), nil
 }
 
 // logReader implements io.ReadCloser for log following

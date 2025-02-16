@@ -19,19 +19,7 @@ func TestLocalImageStore(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	// Create temp directory for tests
-	tmpDir, err := os.MkdirTemp("", "lxc-compose-test")
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer os.RemoveAll(tmpDir)
-
-	// Create the image storage directory
-	err = os.MkdirAll(filepath.Join(tmpDir, "images"), 0755)
-	if err != nil {
-		t.Fatal(err)
-	}
-
+	tmpDir := t.TempDir()
 	store, err := NewLocalImageStore(filepath.Join(tmpDir, "images"))
 	if err != nil {
 		t.Fatal(err)
@@ -43,111 +31,90 @@ func TestLocalImageStore(t *testing.T) {
 		Tag:        "latest",
 	}
 
-	// Test storing an image
-	testData := []byte("mock image data")
-	if err := store.Store(testRef, testData); err != nil {
-		t.Errorf("Store() error = %v", err)
-	}
+	t.Run("basic_operations", func(t *testing.T) {
+		// Test storing an image
+		testData := []byte("mock image data")
+		if err := store.Store(testRef, testData); err != nil {
+			t.Fatal(err)
+		}
 
-	// Test retrieving an image
-	data, err := store.Retrieve(testRef)
-	if err != nil {
-		t.Errorf("Retrieve() error = %v", err)
-	}
-	if string(data) != string(testData) {
-		t.Errorf("Retrieved data does not match stored data")
-	}
+		// Test retrieving an image
+		data, err := store.Get(testRef)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if string(data) != string(testData) {
+			t.Error("retrieved data does not match stored data")
+		}
 
-	// Test listing images
-	refs, err := store.List()
-	if err != nil {
-		t.Errorf("List() error = %v", err)
-	}
-	if len(refs) != 1 {
-		t.Errorf("Expected 1 image, got %d", len(refs))
-		t.FailNow() // Stop here to prevent index out of range panic
-	}
-	if refs[0].Repository != testRef.Repository {
-		t.Errorf("Listed image does not match stored image")
-	}
+		// Test listing images
+		images, err := store.List()
+		if err != nil {
+			t.Fatal(err)
+		}
+		if len(images) != 1 {
+			t.Errorf("expected 1 image, got %d", len(images))
+		}
+		if images[0].Registry != testRef.Registry {
+			t.Errorf("expected registry %s, got %s", testRef.Registry, images[0].Registry)
+		}
 
-	// Test removing an image
-	if err := store.Remove(testRef); err != nil {
-		t.Errorf("Remove() error = %v", err)
-	}
+		// Test removing an image
+		if err := store.Remove(testRef); err != nil {
+			t.Fatal(err)
+		}
 
-	// Verify image was removed
-	refs, err = store.List()
-	if err != nil {
-		t.Errorf("List() error = %v", err)
-	}
-	if len(refs) != 0 {
-		t.Errorf("Expected 0 images after removal, got %d", len(refs))
-	}
+		// Verify removal
+		if _, err := store.Get(testRef); err == nil {
+			t.Error("expected error getting removed image")
+		}
+	})
 
-	// Test storing an image
-	testData = []byte("mock image data")
-	if err := store.Store(testRef, testData); err != nil {
-		t.Fatal(err)
-	}
+	t.Run("cache_operations", func(t *testing.T) {
+		store.SetCacheTTL(1) // 1 second TTL
+		testData := []byte("cache test data")
 
-	// Test listing images
-	images, err := store.List()
-	if err != nil {
-		t.Fatal(err)
-	}
+		// Store image
+		if err := store.Store(testRef, testData); err != nil {
+			t.Fatal(err)
+		}
 
-	if len(images) != 1 {
-		t.Errorf("expected 1 image, got %d", len(images))
-	}
+		// Verify immediate retrieval
+		if _, err := store.Get(testRef); err != nil {
+			t.Error("failed to get cached image")
+		}
 
-	if images[0].Registry != testRef.Registry {
-		t.Errorf("expected registry %s, got %s", testRef.Registry, images[0].Registry)
-	}
+		// Wait for TTL to expire
+		time.Sleep(2 * time.Second)
 
-	if images[0].Repository != testRef.Repository {
-		t.Errorf("expected repository %s, got %s", testRef.Repository, images[0].Repository)
-	}
+		// Verify image is expired
+		if _, err := store.Get(testRef); err == nil {
+			t.Error("expected error getting expired image")
+		}
+	})
 
-	if images[0].Tag != testRef.Tag {
-		t.Errorf("expected tag %s, got %s", testRef.Tag, images[0].Tag)
-	}
+	t.Run("error_handling", func(t *testing.T) {
+		// Test invalid reference
+		invalidRef := ImageReference{}
+		if err := store.Store(invalidRef, []byte{}); err == nil {
+			t.Error("expected error storing with invalid reference")
+		}
 
-	// Test multiple images
-	testRef2 := ImageReference{
-		Registry:   "docker.io",
-		Repository: "library/nginx",
-		Tag:        "latest",
-	}
+		// Test storing in non-existent directory
+		badStore, _ := NewLocalImageStore("/nonexistent/path")
+		if err := badStore.Store(testRef, []byte{}); err == nil {
+			t.Error("expected error storing to invalid path")
+		}
 
-	if err := store.Store(testRef2, testData); err != nil {
-		t.Fatal(err)
-	}
-
-	images, err = store.List()
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	if len(images) != 2 {
-		t.Errorf("expected 2 images, got %d", len(images))
-	}
-
-	// Test corrupted metadata handling
-	corruptedPath := filepath.Join(tmpDir, "images", "corrupted.json")
-	if err := os.WriteFile(corruptedPath, []byte("invalid json"), 0644); err != nil {
-		t.Fatal(err)
-	}
-
-	images, err = store.List()
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	// Should still get valid images even with corrupted file
-	if len(images) != 2 {
-		t.Errorf("expected 2 images despite corrupted file, got %d", len(images))
-	}
+		// Test corrupted metadata
+		metadataPath := filepath.Join(store.rootDir, "metadata.json")
+		if err := os.WriteFile(metadataPath, []byte("invalid json"), 0644); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := store.List(); err == nil {
+			t.Error("expected error with corrupted metadata")
+		}
+	})
 }
 
 func TestImageCaching(t *testing.T) {

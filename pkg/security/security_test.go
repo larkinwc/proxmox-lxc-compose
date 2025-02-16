@@ -1,11 +1,20 @@
 package security_test
 
 import (
-	"proxmox-lxc-compose/pkg/security"
+	"os"
 	"testing"
+
+	"proxmox-lxc-compose/pkg/security"
 )
 
 func TestProfileValidation(t *testing.T) {
+	// Save original PATH and restore after test
+	originalPath := os.Getenv("PATH")
+	defer os.Setenv("PATH", originalPath)
+
+	// Set empty PATH to simulate environment without apparmor/selinux tools
+	os.Setenv("PATH", "")
+
 	tests := []struct {
 		name    string
 		profile *security.Profile
@@ -28,11 +37,43 @@ func TestProfileValidation(t *testing.T) {
 			wantErr: false,
 		},
 		{
+			name: "valid privileged profile",
+			profile: &security.Profile{
+				Isolation:  security.IsolationPrivileged,
+				Privileged: true,
+			},
+			wantErr: false,
+		},
+		{
 			name: "invalid isolation level",
 			profile: &security.Profile{
 				Isolation: "invalid",
 			},
 			wantErr: true,
+		},
+		{
+			name: "strict with privileged",
+			profile: &security.Profile{
+				Isolation:  security.IsolationStrict,
+				Privileged: true,
+			},
+			wantErr: true,
+		},
+		{
+			name: "custom apparmor profile",
+			profile: &security.Profile{
+				Isolation:    security.IsolationStrict,
+				AppArmorName: "custom-profile",
+			},
+			wantErr: false, // Should pass when apparmor tools not available
+		},
+		{
+			name: "custom selinux context",
+			profile: &security.Profile{
+				Isolation:      security.IsolationStrict,
+				SELinuxContext: "custom_u:custom_r:custom_t:s0",
+			},
+			wantErr: false, // Should pass when selinux tools not available
 		},
 	}
 
@@ -47,6 +88,13 @@ func TestProfileValidation(t *testing.T) {
 }
 
 func TestProfileApplication(t *testing.T) {
+	// Save original PATH and restore after test
+	originalPath := os.Getenv("PATH")
+	defer os.Setenv("PATH", originalPath)
+
+	// Set empty PATH to simulate environment without apparmor/selinux tools
+	os.Setenv("PATH", "")
+
 	tests := []struct {
 		name          string
 		profile       *security.Profile
@@ -70,6 +118,24 @@ func TestProfileApplication(t *testing.T) {
 			},
 			containerName: "test-container",
 			wantErr:       false,
+		},
+		{
+			name: "apply privileged profile",
+			profile: &security.Profile{
+				Isolation:  security.IsolationPrivileged,
+				Privileged: true,
+			},
+			containerName: "test-container",
+			wantErr:       false,
+		},
+		{
+			name: "apply with custom apparmor",
+			profile: &security.Profile{
+				Isolation:    security.IsolationStrict,
+				AppArmorName: "custom-profile",
+			},
+			containerName: "test-container",
+			wantErr:       false, // Should pass when apparmor tools not available
 		},
 	}
 

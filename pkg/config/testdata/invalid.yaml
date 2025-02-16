@@ -1,0 +1,26 @@
+version: "1.0"
+services:
+  test-container:
+    # Missing required image field
+    storage:
+      root: "invalid size"  # Invalid storage size
+    network:
+      type: "invalid"  # Invalid network type
+      ip: "not an ip"  # Invalid IP address
+  app:
+    # Missing required image field
+    network:
+      type: invalid
+      bridge: lxcbr0
+      interface: eth0
+      ip: not-an-ip
+      gateway: invalid
+      dns:
+        - not-a-dns
+    security:
+      isolation: invalid
+      capabilities:
+        - INVALID_CAP
+    storage:
+      root: invalid
+      backend: invalid

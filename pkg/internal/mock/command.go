@@ -2,11 +2,8 @@
 package mock
 
 import (
-	"encoding/json"
 	"fmt"
-	"os"
 	"os/exec"
-	"path/filepath"
 	"strings"
 	"sync"
 	"time"
@@ -14,12 +11,12 @@ import (
 
 // CommandState tracks the state of mock commands
 type CommandState struct {
-	mu             sync.RWMutex
-	Name           string
-	Args           []string
-	tmpFiles       []string
-	debug          bool
-	commandHistory []struct {
+	mu              sync.RWMutex
+	debug           bool
+	ContainerStates map[string]string
+	mockOutput      map[string][]byte
+	CalledCommands  map[string]bool
+	commandHistory  []struct {
 		name string
 		args []string
 	}
@@ -32,124 +29,81 @@ type containerState struct {
 	Status        string     `json:"status"`
 }
 
-// SetDebug enables or disables debug logging
+// SetDebug enables or disables debug mode
 func (m *CommandState) SetDebug(enabled bool) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	m.debug = enabled
 }
 
-// getStateFromFile reads the container state from its state file
-func (m *CommandState) getStateFromFile(containerName string) (string, error) {
-	if configPath, ok := os.LookupEnv("CONTAINER_CONFIG_PATH"); ok {
-		stateFilePath := filepath.Join(configPath, "state", containerName+".json")
-		data, err := os.ReadFile(stateFilePath)
-		if err != nil {
-			return "", err
-		}
+// getContainerState gets the container state from memory
+func (m *CommandState) getContainerState(containerName string) (string, error) {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
 
-		var stateData struct {
-			Status string `json:"status"`
+	if state, exists := m.ContainerStates[containerName]; exists {
+		if m.debug {
+			fmt.Printf("DEBUG: Found container state for %s: %s\n", containerName, state)
 		}
-		if err := json.Unmarshal(data, &stateData); err != nil {
-			return "", err
-		}
-
-		return stateData.Status, nil
+		return state, nil
 	}
-	return "", fmt.Errorf("CONTAINER_CONFIG_PATH not set")
+	return "", fmt.Errorf("container state not found")
 }
 
 // SetContainerState allows tests to set the state of a container
 func (m *CommandState) SetContainerState(containerName, state string) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
+
 	state = strings.ToUpper(state)
+	m.ContainerStates[containerName] = state
 
-	if configPath, ok := os.LookupEnv("CONTAINER_CONFIG_PATH"); ok {
-		// Create state directory if it doesn't exist
-		statePath := filepath.Join(configPath, "state")
-		if err := os.MkdirAll(statePath, 0755); err != nil {
-			return fmt.Errorf("failed to create state directory: %w", err)
-		}
-
-		// Create state file
-		stateFilePath := filepath.Join(statePath, containerName+".json")
-		stateData := containerState{
-			Name:      containerName,
-			CreatedAt: time.Now(),
-			Status:    state,
-		}
-
-		data, err := json.MarshalIndent(stateData, "", "  ")
-		if err != nil {
-			return fmt.Errorf("failed to marshal state data: %w", err)
-		}
-
-		if err := os.WriteFile(stateFilePath, data, 0644); err != nil {
-			return fmt.Errorf("failed to write state file: %w", err)
-		}
+	if m.debug {
+		fmt.Printf("DEBUG: Set container state for %s to %s\n", containerName, state)
 	}
 	return nil
 }
 
-// AddContainer adds a container to the mock state and ensures its state file exists
+// RemoveContainer removes a container's state
+func (m *CommandState) RemoveContainer(containerName string) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	delete(m.ContainerStates, containerName)
+	if m.debug {
+		fmt.Printf("DEBUG: Removed container state for %s\n", containerName)
+	}
+	return nil
+}
+
+// AddContainer adds a container to the mock state
 func (m *CommandState) AddContainer(containerName, state string) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
 	if m.debug {
 		fmt.Printf("DEBUG: Adding container %s with state %s\n", containerName, state)
 	}
 
-	if configPath, ok := os.LookupEnv("CONTAINER_CONFIG_PATH"); ok {
-		// Create container directory
-		containerPath := filepath.Join(configPath, containerName)
-		if err := os.MkdirAll(containerPath, 0755); err != nil {
-			return fmt.Errorf("failed to create container directory: %w", err)
-		}
-
-		// Create a dummy config file to mark this as a valid container
-		configFile := filepath.Join(containerPath, "config")
-		if err := os.WriteFile(configFile, []byte("# LXC Config\n"), 0644); err != nil {
-			return fmt.Errorf("failed to create config file: %w", err)
-		}
-	}
-
 	// Set the container state
-	return m.SetContainerState(containerName, state)
+	m.ContainerStates[containerName] = strings.ToUpper(state)
+	return nil
 }
 
 // ContainerExists checks if a container exists
 func (m *CommandState) ContainerExists(containerName string) bool {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+
 	if m.debug {
 		fmt.Printf("DEBUG: ContainerExists check for %s\n", containerName)
 	}
-	if containerName == "nonexistent" {
-		if m.debug {
-			fmt.Printf("DEBUG: Container %s is nonexistent\n", containerName)
-		}
-		return false
-	}
-	if configPath, ok := os.LookupEnv("CONTAINER_CONFIG_PATH"); ok {
-		// Check container directory first
-		containerPath := filepath.Join(configPath, containerName)
-		dirExists := false
-		if _, err := os.Stat(containerPath); err == nil {
-			dirExists = true
-		}
-		// Then check state file
-		stateFilePath := filepath.Join(configPath, "state", containerName+".json")
-		stateExists := false
-		if _, err := os.Stat(stateFilePath); err == nil {
-			stateExists = true
-		}
-		if m.debug {
-			fmt.Printf("DEBUG: Container %s directory exists: %v, state exists: %v\n", containerName, dirExists, stateExists)
-		}
-		return dirExists || stateExists
-	}
+
+	_, exists := m.ContainerStates[containerName]
 	if m.debug {
-		fmt.Printf("DEBUG: CONTAINER_CONFIG_PATH not set\n")
+		fmt.Printf("DEBUG: Container %s exists: %v\n", containerName, exists)
 	}
-	return false
+	return exists
 }
 
 // GetContainerState returns the current state of a container
@@ -157,182 +111,270 @@ func (m *CommandState) GetContainerState(containerName string) string {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
 
-	state, err := m.getStateFromFile(containerName)
-	if err != nil {
-		return ""
-	}
+	state, _ := m.getContainerState(containerName)
 	return state
 }
 
-func (m *CommandState) execLXCCommand(containerName string, command string, _ ...string) error {
+// execLXCCommand handles LXC command execution and state transitions
+func (m *CommandState) execLXCCommand(name string, args ...string) ([]byte, error) {
 	if m.debug {
-		fmt.Printf("DEBUG: Executing command %s for container %s\n", command, containerName)
+		fmt.Printf("DEBUG: Mock command called: %s %s\n", name, strings.Join(args, " "))
 	}
 
-	// First verify container exists
-	if !m.ContainerExists(containerName) {
-		if m.debug {
-			fmt.Printf("DEBUG: Container %s does not exist\n", containerName)
+	// Record command execution
+	m.commandHistory = append(m.commandHistory, struct {
+		name string
+		args []string
+	}{name, args})
+
+	// Handle lxc-info command
+	if name == "lxc-info" && len(args) >= 2 && args[0] == "-n" {
+		containerName := args[1]
+		if state, exists := m.ContainerStates[containerName]; exists {
+			if m.debug {
+				fmt.Printf("DEBUG: Found container state for %s: %s\n", containerName, state)
+			}
+			return []byte(fmt.Sprintf("Name: %s\nState: %s\n", containerName, state)), nil
 		}
-		return fmt.Errorf("container %s does not exist", containerName)
+		return []byte("container does not exist\n"), fmt.Errorf("exit status 1")
 	}
 
-	// Get current state with retries to ensure stability
-	var state string
-	var err error
-	for i := 0; i < 3; i++ {
-		state, err = m.getStateFromFile(containerName)
-		if err == nil {
-			break
-		}
-		time.Sleep(50 * time.Millisecond)
-	}
-	if err != nil {
+	// Handle lxc-destroy command
+	if name == "lxc-destroy" && len(args) >= 2 && args[0] == "-n" {
+		containerName := args[1]
+		delete(m.ContainerStates, containerName)
 		if m.debug {
-			fmt.Printf("DEBUG: Failed to get state for %s: %v\n", containerName, err)
+			fmt.Printf("DEBUG: Removed container state for %s\n", containerName)
 		}
-		return fmt.Errorf("failed to get container state: %w", err)
+		return nil, nil
 	}
+
+	// Handle lxc-start command
+	if name == "lxc-start" && len(args) >= 2 && args[0] == "-n" {
+		containerName := args[1]
+		if _, exists := m.ContainerStates[containerName]; exists {
+			m.ContainerStates[containerName] = "RUNNING"
+			if m.debug {
+				fmt.Printf("DEBUG: Started container %s\n", containerName)
+			}
+			return nil, nil
+		}
+		return []byte("container does not exist\n"), fmt.Errorf("exit status 1")
+	}
+
+	// Handle lxc-stop command
+	if name == "lxc-stop" && len(args) >= 2 && args[0] == "-n" {
+		containerName := args[1]
+		if _, exists := m.ContainerStates[containerName]; exists {
+			m.ContainerStates[containerName] = "STOPPED"
+			if m.debug {
+				fmt.Printf("DEBUG: Stopped container %s\n", containerName)
+			}
+			return nil, nil
+		}
+		return []byte("container does not exist\n"), fmt.Errorf("exit status 1")
+	}
+
+	return nil, nil
+}
+
+// mockCmd is a custom command type for mocking
+type mockCmd struct {
+	*exec.Cmd
+	runErr error
+	output []byte
+}
+
+// SetupMockCommand sets up a mock command executor
+func SetupMockCommand(execCommand *func(string, ...string) *exec.Cmd) (MockCommand, func()) {
+	mockState := NewCommandState()
+	originalExecCommand := *execCommand
+
+	*execCommand = func(command string, args ...string) *exec.Cmd {
+		// Create a new command that will never actually execute
+		cmd := exec.Command("/bin/true")
+		cmd.Args = append([]string{command}, args...)
+
+		// Handle mock output based on command
+		output, err := mockState.execLXCCommand(command, args...)
+		if err != nil {
+			// For error cases, return a command that will fail
+			failCmd := exec.Command("/bin/false")
+			failCmd.Args = append([]string{command}, args...)
+			return failCmd
+		}
+
+		// For success cases with output, store it in the environment
+		if output != nil {
+			cmd.Env = append(cmd.Env, "MOCK_OUTPUT="+string(output))
+		}
+
+		return cmd
+	}
+
+	// Return cleanup function
+	cleanup := func() {
+		*execCommand = originalExecCommand
+	}
+
+	return mockState, cleanup
+}
+
+// AddMockOutput adds a mock output for a specific command
+func (m *CommandState) AddMockOutput(command string, output []byte) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
 	if m.debug {
-		fmt.Printf("DEBUG: Current state for %s: %s\n", containerName, state)
+		fmt.Printf("DEBUG: Adding mock output for command: '%s'\n", command)
+	}
+	m.mockOutput[command] = output
+	m.CalledCommands[command] = false
+}
+
+// WasCalled checks if a command was called
+func (m *CommandState) WasCalled(cmd string) bool {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	called, exists := m.CalledCommands[cmd]
+	return exists && called
+}
+
+// Command executes a mock command
+func (m *CommandState) Command(cmd string, args ...string) ([]byte, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	fullCmd := cmd
+	if len(args) > 0 {
+		fullCmd = cmd + " " + strings.Join(args, " ")
 	}
 
-	// Handle command
-	newState := state
-	switch command {
+	m.CalledCommands[fullCmd] = true
+
+	if output, exists := m.mockOutput[fullCmd]; exists {
+		return output, nil
+	}
+
+	return []byte{}, nil
+}
+
+// MockCommand represents a mock command executor
+type MockCommand interface {
+	Run(name string, args ...string) error
+	Output(name string, args ...string) ([]byte, error)
+	CombinedOutput(name string, args ...string) ([]byte, error)
+	SetDebug(enabled bool)
+	ContainerExists(containerName string) bool
+	SetContainerState(containerName, state string) error
+	RemoveContainer(containerName string) error
+	AddContainer(containerName, state string) error
+	AddMockOutput(command string, output []byte)
+	WasCalled(cmd string) bool
+	Command(cmd string, args ...string) ([]byte, error)
+}
+
+// Run executes a command with the given arguments
+func (m *CommandState) Run(name string, args ...string) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	if m.debug {
+		fmt.Printf("DEBUG: Mock command called: %s %s\n", name, strings.Join(args, " "))
+	}
+
+	// Record command execution
+	m.commandHistory = append(m.commandHistory, struct {
+		name string
+		args []string
+	}{name, args})
+
+	// Handle lxc commands
+	switch name {
+	case "lxc-info":
+		if len(args) >= 2 && args[0] == "-n" {
+			containerName := args[1]
+			if _, exists := m.ContainerStates[containerName]; exists {
+				return nil
+			}
+			return fmt.Errorf("container does not exist")
+		}
+		return fmt.Errorf("invalid arguments")
+
+	case "lxc-destroy":
+		if len(args) >= 2 && args[0] == "-n" {
+			containerName := args[1]
+			delete(m.ContainerStates, containerName)
+			return nil
+		}
+		return fmt.Errorf("invalid arguments")
+
 	case "lxc-start":
-		if strings.ToUpper(state) != "STOPPED" {
-			if m.debug {
-				fmt.Printf("DEBUG: Cannot start container %s in state %s\n", containerName, state)
+		if len(args) >= 2 && args[0] == "-n" {
+			containerName := args[1]
+			if _, exists := m.ContainerStates[containerName]; exists {
+				m.ContainerStates[containerName] = "RUNNING"
+				return nil
 			}
-			return fmt.Errorf("container is not in a valid state for starting (current state: %s)", state)
+			return fmt.Errorf("container does not exist")
 		}
-		newState = "RUNNING"
+		return fmt.Errorf("invalid arguments")
+
 	case "lxc-stop":
-		if strings.ToUpper(state) != "RUNNING" && strings.ToUpper(state) != "FROZEN" {
-			if m.debug {
-				fmt.Printf("DEBUG: Cannot stop container %s in state %s\n", containerName, state)
+		if len(args) >= 2 && args[0] == "-n" {
+			containerName := args[1]
+			if _, exists := m.ContainerStates[containerName]; exists {
+				m.ContainerStates[containerName] = "STOPPED"
+				return nil
 			}
-			return fmt.Errorf("container is not in a valid state for stopping (current state: %s)", state)
+			return fmt.Errorf("container does not exist")
 		}
-		newState = "STOPPED"
-	case "lxc-freeze":
-		if strings.ToUpper(state) != "RUNNING" {
-			return fmt.Errorf("container is not in a valid state for freezing (current state: %s)", state)
-		}
-		newState = "FROZEN"
-	case "lxc-unfreeze":
-		if strings.ToUpper(state) != "FROZEN" {
-			return fmt.Errorf("container is not in a valid state for unfreezing (current state: %s)", state)
-		}
-		newState = "RUNNING"
-	}
-
-	if m.debug && newState != state {
-		fmt.Printf("DEBUG: Transitioning container %s from %s to %s\n", containerName, state, newState)
-	}
-
-	// Update state if changed with retries to ensure stability
-	if newState != state {
-		for i := 0; i < 3; i++ {
-			if err := m.SetContainerState(containerName, newState); err == nil {
-				break
-			}
-			if i < 2 {
-				time.Sleep(50 * time.Millisecond)
-			}
-		}
+		return fmt.Errorf("invalid arguments")
 	}
 
 	return nil
 }
 
-// SetupMockCommand sets up command mocking and returns a cleanup function
-func SetupMockCommand(execCommand *func(string, ...string) *exec.Cmd) (*CommandState, func()) {
-	mock := &CommandState{
-		tmpFiles: make([]string, 0),
-		debug:    true,
-		commandHistory: make([]struct {
-			name string
-			args []string
-		}, 0),
-	}
-	oldExec := *execCommand
-	*execCommand = func(name string, args ...string) *exec.Cmd {
-		if mock.debug {
-			fmt.Printf("DEBUG: Mock command called: %s %s\n", name, strings.Join(args, " "))
-		}
+// Output executes a command and returns its output
+func (m *CommandState) Output(name string, args ...string) ([]byte, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
 
-		mock.mu.Lock()
-		mock.Name = name
-		mock.Args = args
-		mock.commandHistory = append(mock.commandHistory, struct {
-			name string
-			args []string
-		}{name, args})
-		mock.mu.Unlock()
-
-		// For all commands, first check if args are valid
-		if len(args) < 2 || args[0] != "-n" {
-			return exec.Command("sh", "-c", "echo 'Invalid arguments' >&2; exit 2")
-		}
-
-		containerName := args[1]
-		if containerName == "nonexistent" {
-			return exec.Command("sh", "-c", "echo 'Container does not exist' >&2; exit 2")
-		}
-
-		switch name {
-		case "lxc-start", "lxc-stop", "lxc-freeze", "lxc-unfreeze":
-			if err := mock.execLXCCommand(containerName, name); err != nil {
-				return exec.Command("sh", "-c", fmt.Sprintf("echo '%s' >&2; exit 1", err))
-			}
-			return exec.Command("sh", "-c", "true")
-
-		case "lxc-info":
-			if !mock.ContainerExists(containerName) {
-				return exec.Command("sh", "-c", "echo 'Container does not exist' >&2; exit 2")
-			}
-			state, err := mock.getStateFromFile(containerName)
-			if err != nil {
-				return exec.Command("sh", "-c", fmt.Sprintf("echo '%s' >&2; exit 1", err))
-			}
-			return exec.Command("sh", "-c", fmt.Sprintf("echo 'State: %s'", state))
-
-		case "lxc-attach":
-			if !mock.ContainerExists(containerName) {
-				return exec.Command("sh", "-c", "echo 'Container does not exist' >&2; exit 2")
-			}
-			// Check if this is a tail -f command for console.log
-			if strings.Contains(strings.Join(args, " "), "tail -f /var/log/console.log") {
-				// Create a script that properly streams logs one at a time with line buffering
-				return exec.Command("sh", "-c", `
-					stdbuf -oL bash -c '
-						echo "[$(date -Iseconds)] Container started"
-						sleep 0.1
-						echo "[$(date -Iseconds)] Service initialized"
-						sleep 0.1
-						echo "[$(date -Iseconds)] Ready to accept connections"
-						# Keep streaming
-						while true; do sleep 1; done
-					'
-				`)
-			}
-			return exec.Command("sh", "-c", "true")
-		}
-
-		return exec.Command("sh", "-c", fmt.Sprintf("echo 'Unknown command: %s' >&2; exit 1", name))
+	if m.debug {
+		fmt.Printf("DEBUG: Mock command called: %s %s\n", name, strings.Join(args, " "))
 	}
 
-	return mock, func() {
-		if mock.debug {
-			fmt.Printf("DEBUG: Cleaning up %d temporary files\n", len(mock.tmpFiles))
+	// Record command execution
+	m.commandHistory = append(m.commandHistory, struct {
+		name string
+		args []string
+	}{name, args})
+
+	// Handle lxc commands
+	switch name {
+	case "lxc-info":
+		if len(args) >= 2 && args[0] == "-n" {
+			containerName := args[1]
+			if state, exists := m.ContainerStates[containerName]; exists {
+				return []byte(fmt.Sprintf("Name: %s\nState: %s\n", containerName, state)), nil
+			}
+			return []byte("container does not exist\n"), fmt.Errorf("exit status 1")
 		}
-		mock.mu.Lock()
-		defer mock.mu.Unlock()
-		for _, file := range mock.tmpFiles {
-			os.Remove(file)
-		}
-		*execCommand = oldExec
+		return []byte{}, fmt.Errorf("invalid arguments")
+	}
+
+	return []byte{}, nil
+}
+
+// CombinedOutput executes a command and returns its combined output
+func (m *CommandState) CombinedOutput(name string, args ...string) ([]byte, error) {
+	return m.Output(name, args...)
+}
+
+// NewCommandState creates a new CommandState
+func NewCommandState() *CommandState {
+	return &CommandState{
+		ContainerStates: make(map[string]string),
+		mockOutput:      make(map[string][]byte),
+		CalledCommands:  make(map[string]bool),
 	}
 }

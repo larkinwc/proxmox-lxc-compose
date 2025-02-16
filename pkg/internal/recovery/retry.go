@@ -32,6 +32,11 @@ func IsRetryable(err error) bool {
 		return false
 	}
 
+	// Check if error implements IsTemporary interface
+	if temp, ok := err.(interface{ IsTemporary() bool }); ok {
+		return temp.IsTemporary()
+	}
+
 	// Add specific error types that should be retried
 	switch {
 	case errors.IsType(err, errors.ErrNetwork):

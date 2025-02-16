@@ -8,6 +8,7 @@ import (
 	"strings"
 	"time"
 
+	"proxmox-lxc-compose/pkg/common"
 	"proxmox-lxc-compose/pkg/config"
 	"proxmox-lxc-compose/pkg/internal/recovery"
 	"proxmox-lxc-compose/pkg/logging"
@@ -16,7 +17,7 @@ import (
 // Manager defines the interface for managing LXC containers
 type Manager interface {
 	// Create creates a new container from the given configuration
-	Create(name string, cfg *config.Container) error
+	Create(name string, cfg *common.Container) error
 	// Start starts a container
 	Start(name string) error
 	// Stop stops a container
@@ -34,7 +35,7 @@ type Manager interface {
 	// Restart stops and then starts a container
 	Restart(name string) error
 	// Update updates a container's configuration
-	Update(name string, cfg *config.Container) error
+	Update(name string, cfg *common.Container) error
 }
 
 // LXCManager implements the Manager interface for LXC containers
@@ -64,11 +65,22 @@ func (m *LXCManager) execLXCCommand(name string, args ...string) error {
 		"args", args,
 		"container", args[1], // args[1] is usually the container name
 	)
+
+	// Create a context with timeout
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
 	// Use retry with backoff for commands that might fail temporarily
-	ctx := context.Background()
 	return recovery.RetryWithBackoff(ctx, recovery.DefaultRetryConfig, func() error {
-		cmd := execCommand(name, args...)
-		if output, err := cmd.CombinedOutput(); err != nil {
+		cmd := ExecCommand(name, args...)
+		output, err := cmd.CombinedOutput()
+
+		// Check if the command timed out
+		if ctx.Err() == context.DeadlineExceeded {
+			return fmt.Errorf("command timed out after 5 seconds")
+		}
+
+		if err != nil {
 			logging.Error("Command failed",
 				"command", name,
 				"args", args,
@@ -85,20 +97,13 @@ func (m *LXCManager) execLXCCommand(name string, args ...string) error {
 func (m *LXCManager) ContainerExists(name string) bool {
 	logging.Debug("Checking if container exists", "name", name)
 
-	// Check if the container exists in our state
+	// Only check state first - directory existence is not enough
 	if _, err := m.state.GetContainerState(name); err == nil {
 		logging.Debug("Container found in state", "name", name)
 		return true
 	}
 
-	// Check if the container directory exists
-	containerPath := filepath.Join(m.configPath, name)
-	if _, err := os.Stat(containerPath); err == nil {
-		logging.Debug("Container directory exists", "name", name, "path", containerPath)
-		return true
-	}
-
-	// Check if the container exists in LXC
+	// If not in state, check LXC
 	if err := m.execLXCCommand("lxc-info", "-n", name); err == nil {
 		logging.Debug("Container found in LXC", "name", name)
 		return true
@@ -109,21 +114,51 @@ func (m *LXCManager) ContainerExists(name string) bool {
 }
 
 // Create implements Manager.Create
-func (m *LXCManager) Create(name string, cfg *config.Container) error {
+func (m *LXCManager) Create(name string, cfg *common.Container) error {
+	if cfg == nil {
+		return fmt.Errorf("container configuration is required")
+	}
+
+	// Validate container configuration
+	if err := validateContainerConfig(cfg); err != nil {
+		return fmt.Errorf("invalid container configuration: %w", err)
+	}
+
 	if m.ContainerExists(name) {
 		return fmt.Errorf("container %s already exists", name)
 	}
 
-	// Create container directory
-	containerPath := filepath.Join(m.configPath, name)
-	if err := os.MkdirAll(containerPath, 0755); err != nil {
-		return fmt.Errorf("failed to create container directory: %w", err)
+	// Create container directory structure
+	containerDir := filepath.Join(m.configPath, name)
+	dirs := []string{
+		containerDir,
+		filepath.Join(containerDir, "rootfs"),
+		filepath.Join(containerDir, "logs"),
+	}
+
+	for _, dir := range dirs {
+		if err := os.MkdirAll(dir, 0755); err != nil {
+			return fmt.Errorf("failed to create container directory %s: %w", dir, err)
+		}
+	}
+
+	// Convert common.Container to config.Container for state saving
+	configContainer := config.FromCommonContainer(cfg)
+
+	// Configure network if specified
+	if cfg.Network != nil {
+		networkCfg := config.FromCommonNetworkConfig(cfg.Network)
+		if err := m.configureNetwork(name, networkCfg); err != nil {
+			return fmt.Errorf("failed to configure network: %w", err)
+		}
 	}
 
 	// Save initial state
-	if err := m.state.SaveContainerState(name, cfg, "STOPPED"); err != nil {
+	if err := m.state.SaveContainerState(name, configContainer, "STOPPED"); err != nil {
 		return fmt.Errorf("failed to save container state: %w", err)
 	}
+
+	logging.Debug("Container created and state saved", "name", name)
 
 	return nil
 }
@@ -148,7 +183,7 @@ func (m *LXCManager) Start(name string) error {
 		return fmt.Errorf("failed to start container: %w", err)
 	}
 
-	// Update state
+	// Update state - container.Config is already *config.Container
 	if err := m.state.SaveContainerState(name, container.Config, "RUNNING"); err != nil {
 		return fmt.Errorf("failed to update container state: %w", err)
 	}
@@ -176,7 +211,7 @@ func (m *LXCManager) Stop(name string) error {
 		return fmt.Errorf("failed to stop container: %w", err)
 	}
 
-	// Update state
+	// Update state - container.Config is already *config.Container
 	if err := m.state.SaveContainerState(name, container.Config, "STOPPED"); err != nil {
 		return fmt.Errorf("failed to update container state: %w", err)
 	}
@@ -193,6 +228,11 @@ func (m *LXCManager) Remove(name string) error {
 
 	if container.State != "STOPPED" {
 		return fmt.Errorf("container '%s' must be stopped before removal", name)
+	}
+
+	// Destroy container in LXC
+	if err := m.execLXCCommand("lxc-destroy", "-n", name); err != nil {
+		return fmt.Errorf("failed to destroy container: %w", err)
 	}
 
 	// Remove container directory
@@ -251,7 +291,7 @@ func (m *LXCManager) Get(name string) (*Container, error) {
 
 	// Try up to 3 times to get a stable state
 	for i := 0; i < 3; i++ {
-		cmd := execCommand("lxc-info", "-n", name)
+		cmd := ExecCommand("lxc-info", "-n", name)
 		output, err := cmd.CombinedOutput()
 		if err == nil {
 			currentState := ""
@@ -312,7 +352,7 @@ func (m *LXCManager) Pause(name string) error {
 		return fmt.Errorf("failed to pause container: %w", err)
 	}
 
-	// Update state
+	// Update state - container.Config is already *config.Container
 	if err := m.state.SaveContainerState(name, container.Config, "FROZEN"); err != nil {
 		return fmt.Errorf("failed to update container state: %w", err)
 	}
@@ -340,7 +380,7 @@ func (m *LXCManager) Resume(name string) error {
 		return fmt.Errorf("failed to resume container: %w", err)
 	}
 
-	// Update state
+	// Update state - container.Config is already *config.Container
 	if err := m.state.SaveContainerState(name, container.Config, "RUNNING"); err != nil {
 		return fmt.Errorf("failed to update container state: %w", err)
 	}
@@ -361,7 +401,7 @@ func (m *LXCManager) Restart(name string) error {
 			return fmt.Errorf("failed to stop container: %w", err)
 		}
 
-		// Update state to STOPPED
+		// Update state to STOPPED - container.Config is already *config.Container
 		if err := m.state.SaveContainerState(name, container.Config, "STOPPED"); err != nil {
 			return fmt.Errorf("failed to update container state: %w", err)
 		}
@@ -378,7 +418,7 @@ func (m *LXCManager) Restart(name string) error {
 		return fmt.Errorf("failed to start container: %w", err)
 	}
 
-	// Update state to RUNNING
+	// Update state to RUNNING - container.Config is already *config.Container
 	if err := m.state.SaveContainerState(name, container.Config, "RUNNING"); err != nil {
 		return fmt.Errorf("failed to update container state: %w", err)
 	}
@@ -387,16 +427,20 @@ func (m *LXCManager) Restart(name string) error {
 }
 
 // Update implements Manager.Update
-func (m *LXCManager) Update(name string, cfg *config.Container) error {
+func (m *LXCManager) Update(name string, cfg *common.Container) error {
+	if cfg == nil {
+		return fmt.Errorf("container configuration is required")
+	}
+
 	container, err := m.Get(name)
 	if err != nil {
 		return fmt.Errorf("failed to get container: %w", err)
 	}
 
-	// Save new configuration
-	if err := m.state.SaveContainerState(name, cfg, container.State); err != nil {
-		return fmt.Errorf("failed to update container configuration: %w", err)
+	// Convert common.Container to config.Container for state saving
+	configContainer := config.FromCommonContainer(cfg)
+	if err := m.state.SaveContainerState(name, configContainer, container.State); err != nil {
+		return fmt.Errorf("failed to save container state: %w", err)
 	}
-
 	return nil
 }

@@ -1,5 +1,5 @@
-// Package testing provides test helper functions
-package testing
+// Package testing_internal provides test helper functions
+package testing_internal
 
 import (
 	"os"
@@ -37,6 +37,14 @@ func AssertContains(t *testing.T, s, substr string) {
 	t.Helper()
 	if !strings.Contains(s, substr) {
 		t.Fatalf("expected %q to contain %q", s, substr)
+	}
+}
+
+// AssertNotContains fails the test if s contains substr
+func AssertNotContains(t *testing.T, s, substr string) {
+	t.Helper()
+	if strings.Contains(s, substr) {
+		t.Fatalf("expected %q to not contain %q", s, substr)
 	}
 }
 
@@ -82,4 +90,9 @@ func WriteFile(t *testing.T, dir, name, content string) string {
 		t.Fatalf("failed to write file: %v", err)
 	}
 	return path
+}
+
+// Contains checks if a string contains a substring, with additional validation
+func Contains(s, substr string) bool {
+	return s != "" && substr != "" && strings.Contains(s, substr)
 }
