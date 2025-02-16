@@ -31,13 +31,6 @@ func upCmdRunE(_ *cobra.Command, args []string) error {
 		return fmt.Errorf("failed to load config: %w", err)
 	}
 
-	// Convert to compose config type
-	var compose common.ComposeConfig
-	compose.Services = make(map[string]common.Container)
-	if cfg != nil {
-		compose.Services["default"] = cfg.Services["default"]
-	}
-
 	// Create container manager
 	manager, err := container.NewLXCManager("/var/lib/lxc")
 	if err != nil {
@@ -47,13 +40,14 @@ func upCmdRunE(_ *cobra.Command, args []string) error {
 	// Start all or specified services
 	services := args
 	if len(services) == 0 {
-		for name := range compose.Services {
+		// If no services specified, start all
+		for name := range cfg.Services {
 			services = append(services, name)
 		}
 	}
 
 	for _, name := range services {
-		svcCfg, ok := compose.Services[name]
+		svcCfg, ok := cfg.Services[name]
 		if !ok {
 			return fmt.Errorf("service '%s' not found in config", name)
 		}

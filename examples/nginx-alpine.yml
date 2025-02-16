@@ -1,6 +1,6 @@
 version: "1.0"
 services:
-  nginx:
+  nginx-alpine:
     image: alpine:3.19
     security:
       isolation: strict

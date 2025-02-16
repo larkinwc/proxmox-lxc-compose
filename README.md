@@ -170,10 +170,20 @@ The tool includes an intelligent caching system for OCI images:
 
 ## Usage
 
+Basic workflow for creating containers:
 ```bash
-# Start containers
-lxc-compose up
+# 1. Pull the image
+lxc-compose images pull alpine:3.19
 
+# 2. Convert it to LXC format
+lxc-compose convert alpine:3.19
+
+# 3. Create and start containers
+lxc-compose up -f your-compose.yml
+```
+
+Other common commands:
+```bash
 # Stop containers
 lxc-compose down
 
@@ -200,10 +210,13 @@ This will convert the Ubuntu 20.04 Docker image to an LXC template.
 
 ### Configuration File (lxc-compose.yml)
 
+The service key in your configuration will be used as the container name.
+
 ```yaml
 version: "1.0"
 services:
-  web:
+  # This container will be named "nginx-web"
+  nginx-web:    # <- This key is used as the container name
     image: ubuntu:20.04
     security:
       isolation: strict
@@ -211,7 +224,6 @@ services:
       capabilities:
         - NET_ADMIN
         - SYS_TIME
-      selinux_context: system_u:system_r:container_t:s0
     cpu:
       cores: 2
       shares: 1024
