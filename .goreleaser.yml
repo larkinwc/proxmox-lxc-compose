@@ -40,12 +40,6 @@ archives:
       - README.md
       - LICENSE*
 
-checksum:
-  name_template: 'checksums.txt'
-
-snapshot:
-  name_template: "{{ incpatch .Version }}-next"
-
 changelog:
   sort: asc
   filters:
@@ -56,36 +50,3 @@ changelog:
       - '^chore:'
       - Merge pull request
       - Merge branch
-
-# brews:
-#   - name: proxmox-lxc-compose
-#     tap:
-#       owner: larkinwc
-#       name: homebrew-tap
-#     folder: Formula
-#     homepage: "https://github.com/larkinwc/proxmox-lxc-compose"
-#     description: "A docker-compose like tool for managing LXC containers in Proxmox"
-#     license: "MIT"
-#     test: |
-#       system "#{bin}/lxc-compose --version"
-#     install: |
-#       bin.install "lxc-compose"
-
-dockers:
-  - image_templates:
-      - "ghcr.io/larkinwc/proxmox-lxc-compose:{{ .Version }}"
-      - "ghcr.io/larkinwc/proxmox-lxc-compose:v{{ .Major }}"
-      - "ghcr.io/larkinwc/proxmox-lxc-compose:v{{ .Major }}.{{ .Minor }}"
-      - "ghcr.io/larkinwc/proxmox-lxc-compose:latest"
-    dockerfile: Dockerfile
-    use: buildx
-    build_flag_templates:
-      - "--platform=linux/amd64"
-      - "--label=org.opencontainers.image.title={{ .ProjectName }}"
-      - "--label=org.opencontainers.image.description=A docker-compose like tool for managing LXC containers in Proxmox"
-      - "--label=org.opencontainers.image.url=https://github.com/larkinwc/proxmox-lxc-compose"
-      - "--label=org.opencontainers.image.source=https://github.com/larkinwc/proxmox-lxc-compose"
-      - "--label=org.opencontainers.image.version={{ .Version }}"
-      - "--label=org.opencontainers.image.created={{ .Date }}"
-      - "--label=org.opencontainers.image.revision={{ .FullCommit }}"
-      - "--label=org.opencontainers.image.licenses=MIT"
