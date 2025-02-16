@@ -76,12 +76,9 @@ dockers:
       - "ghcr.io/larkinwc/proxmox-lxc-compose:{{ .Version }}"
       - "ghcr.io/larkinwc/proxmox-lxc-compose:latest"
     dockerfile: Dockerfile
-    extra_files:
-      - go.mod
-      - go.sum
-      - cmd/
-      - pkg/
+    use: buildx
     build_flag_templates:
+      - "--platform=linux/amd64"
       - "--label=org.opencontainers.image.created={{.Date}}"
       - "--label=org.opencontainers.image.title={{.ProjectName}}"
       - "--label=org.opencontainers.image.revision={{.FullCommit}}"
