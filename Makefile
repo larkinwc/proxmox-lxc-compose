@@ -52,4 +52,43 @@ test-one:
 # Generate mocks (if we add them later)
 .PHONY: generate
 generate:
-	go generate ./... 
+	go generate ./...
+
+# Release helpers
+.PHONY: release-major release-minor release-patch release
+
+# Get current version
+CURRENT_VERSION=$(shell git describe --tags --abbrev=0 2>/dev/null || echo "v0.0.0")
+
+release-major: ## Create a new major release
+	@echo "Current version: $(CURRENT_VERSION)"
+	@NEW_VERSION=$$(semver bump major $(CURRENT_VERSION)) && \
+	echo "Creating major release: $$NEW_VERSION" && \
+	git tag -a $$NEW_VERSION -m "Major release $$NEW_VERSION" && \
+	git push origin $$NEW_VERSION
+
+release-minor: ## Create a new minor release
+	@echo "Current version: $(CURRENT_VERSION)"
+	@NEW_VERSION=$$(semver bump minor $(CURRENT_VERSION)) && \
+	echo "Creating minor release: $$NEW_VERSION" && \
+	git tag -a $$NEW_VERSION -m "Minor release $$NEW_VERSION" && \
+	git push origin $$NEW_VERSION
+
+release-patch: ## Create a new patch release
+	@echo "Current version: $(CURRENT_VERSION)"
+	@NEW_VERSION=$$(semver bump patch $(CURRENT_VERSION)) && \
+	echo "Creating patch release: $$NEW_VERSION" && \
+	git tag -a $$NEW_VERSION -m "Patch release $$NEW_VERSION" && \
+	git push origin $$NEW_VERSION
+
+# Helper to show current version
+version:
+	@echo $(CURRENT_VERSION)
+
+# Dry run a release to test configuration
+release-dry-run:
+	goreleaser release --snapshot --clean --skip-publish
+
+# Check release configuration
+release-check:
+	goreleaser check 
