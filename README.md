@@ -129,7 +129,7 @@ The main purpose of the CLI is to read a lxc-compose.yml file and use it to crea
 ## Installation
 
 ```bash
-go install github.com/yourusername/proxmox-lxc-compose@latest
+go install github.com/larkinwc/proxmox-lxc-compose@latest
 ```
 
 Or build from source:
