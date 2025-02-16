@@ -62,21 +62,21 @@ CURRENT_VERSION=$(shell git describe --tags --abbrev=0 2>/dev/null || echo "v0.0
 
 release-major: ## Create a new major release
 	@echo "Current version: $(CURRENT_VERSION)"
-	@NEW_VERSION=$$(semver bump major $(CURRENT_VERSION)) && \
+	@NEW_VERSION=$$(echo "$(CURRENT_VERSION)" | awk -F. '{ printf "v%d.0.0", $$1+1 }') && \
 	echo "Creating major release: $$NEW_VERSION" && \
 	git tag -a $$NEW_VERSION -m "Major release $$NEW_VERSION" && \
 	git push origin $$NEW_VERSION
 
 release-minor: ## Create a new minor release
 	@echo "Current version: $(CURRENT_VERSION)"
-	@NEW_VERSION=$$(semver bump minor $(CURRENT_VERSION)) && \
+	@NEW_VERSION=$$(echo "$(CURRENT_VERSION)" | awk -F. '{ printf "v%d.%d.0", $$1, $$2+1 }') && \
 	echo "Creating minor release: $$NEW_VERSION" && \
 	git tag -a $$NEW_VERSION -m "Minor release $$NEW_VERSION" && \
 	git push origin $$NEW_VERSION
 
 release-patch: ## Create a new patch release
 	@echo "Current version: $(CURRENT_VERSION)"
-	@NEW_VERSION=$$(semver bump patch $(CURRENT_VERSION)) && \
+	@NEW_VERSION=$$(echo "$(CURRENT_VERSION)" | awk -F. '{ printf "v%d.%d.%d", $$1, $$2, $$3+1 }') && \
 	echo "Creating patch release: $$NEW_VERSION" && \
 	git tag -a $$NEW_VERSION -m "Patch release $$NEW_VERSION" && \
 	git push origin $$NEW_VERSION
