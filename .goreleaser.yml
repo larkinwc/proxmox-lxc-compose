@@ -74,12 +74,18 @@ changelog:
 dockers:
   - image_templates:
       - "ghcr.io/larkinwc/proxmox-lxc-compose:{{ .Version }}"
+      - "ghcr.io/larkinwc/proxmox-lxc-compose:v{{ .Major }}"
+      - "ghcr.io/larkinwc/proxmox-lxc-compose:v{{ .Major }}.{{ .Minor }}"
       - "ghcr.io/larkinwc/proxmox-lxc-compose:latest"
     dockerfile: Dockerfile
     use: buildx
     build_flag_templates:
       - "--platform=linux/amd64"
-      - "--label=org.opencontainers.image.created={{.Date}}"
-      - "--label=org.opencontainers.image.title={{.ProjectName}}"
-      - "--label=org.opencontainers.image.revision={{.FullCommit}}"
-      - "--label=org.opencontainers.image.version={{.Version}}" 
+      - "--label=org.opencontainers.image.title={{ .ProjectName }}"
+      - "--label=org.opencontainers.image.description=A docker-compose like tool for managing LXC containers in Proxmox"
+      - "--label=org.opencontainers.image.url=https://github.com/larkinwc/proxmox-lxc-compose"
+      - "--label=org.opencontainers.image.source=https://github.com/larkinwc/proxmox-lxc-compose"
+      - "--label=org.opencontainers.image.version={{ .Version }}"
+      - "--label=org.opencontainers.image.created={{ .Date }}"
+      - "--label=org.opencontainers.image.revision={{ .FullCommit }}"
+      - "--label=org.opencontainers.image.licenses=MIT"
