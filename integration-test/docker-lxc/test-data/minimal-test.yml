@@ -1,0 +1,16 @@
+version: "3"
+services:
+  minimal:
+    image: "ubuntu:20.04"
+    # Remove all network configuration to avoid networking issues
+    storage:
+      root: "1G" 
+      backend: "dir"
+    security:
+      privileged: false
+    cpu:
+      cores: 1
+    memory:
+      limit: "512M"
+    environment:
+      TEST_VAR: "minimal_test" 

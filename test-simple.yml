@@ -1,0 +1,17 @@
+version: "3"
+services:
+  web:
+    image: "ubuntu:20.04"
+    network:
+      type: "none"  # Use host networking to avoid bridge issues
+    storage:
+      root: "1G"
+      backend: "dir"
+    security:
+      privileged: false
+    cpu:
+      cores: 1
+    memory:
+      limit: "256M"
+    environment:
+      TEST_VAR: "init_test" 

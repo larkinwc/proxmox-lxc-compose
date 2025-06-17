@@ -25,7 +25,7 @@ func init() {
 			name := args[0]
 
 			// Create container manager
-			manager, err := container.NewLXCManager("/var/lib/lxc")
+			manager, err := container.NewManager(backend, "/var/lib/lxc")
 			if err != nil {
 				return fmt.Errorf("failed to create container manager: %w", err)
 			}

@@ -14,6 +14,7 @@ var (
 	cfgFile     string
 	debugMode   bool
 	development bool
+	backend     string
 )
 
 func init() {
@@ -22,6 +23,7 @@ func init() {
 	rootCmd.PersistentFlags().StringVar(&cfgFile, "config", "", "config file (default is $HOME/.lxc-compose.yaml)")
 	rootCmd.PersistentFlags().BoolVar(&debugMode, "debug", false, "enable debug logging")
 	rootCmd.PersistentFlags().BoolVar(&development, "dev", false, "enable development mode")
+	rootCmd.PersistentFlags().StringVar(&backend, "backend", "auto", "container backend to use (pct|lxc|auto)")
 }
 
 func initConfig() {

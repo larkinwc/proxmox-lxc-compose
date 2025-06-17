@@ -3,6 +3,7 @@ package container
 import (
 	"context"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"strings"
@@ -37,6 +38,10 @@ type Manager interface {
 	Restart(name string) error
 	// Update updates a container's configuration
 	Update(name string, cfg *config.Container) error
+	// GetLogs returns container logs with given options
+	GetLogs(name string, opts LogOptions) (io.ReadCloser, error)
+	// FollowLogs streams logs to writer
+	FollowLogs(name string, w io.Writer) error
 }
 
 // LXCManager implements the Manager interface for LXC containers
@@ -165,9 +170,25 @@ func (m *LXCManager) Create(name string, cfg *config.Container) error {
 
 		// Extract the template to the rootfs
 		rootfsPath := filepath.Join(containerDir, "rootfs")
-		if err := m.execLXCCommand("tar", "-xzf", templatePath, "-C", rootfsPath); err != nil {
-			return fmt.Errorf("failed to extract rootfs: %w", err)
+
+		// Use tar with proper flags for container rootfs extraction
+		cmd := ExecCommand("tar", "-xzf", templatePath, "-C", rootfsPath, "--numeric-owner", "--preserve-permissions")
+		if output, err := cmd.CombinedOutput(); err != nil {
+			logging.Error("Failed to extract rootfs", "templatePath", templatePath, "rootfsPath", rootfsPath, "output", string(output))
+			return fmt.Errorf("failed to extract rootfs: %w (output: %s)", err, string(output))
 		}
+
+		logging.Debug("Rootfs extraction completed", "templatePath", templatePath, "rootfsPath", rootfsPath)
+
+		// Setup container for proper initialization
+		if err := m.setupContainerInit(rootfsPath); err != nil {
+			logging.Error("Failed to setup container init", "container", name, "error", err)
+		}
+	}
+
+	// Generate the main LXC configuration file
+	if err := m.generateLXCConfig(name, cfg); err != nil {
+		return fmt.Errorf("failed to generate LXC config: %w", err)
 	}
 
 	// Apply container configuration
@@ -212,8 +233,13 @@ func (m *LXCManager) Start(name string) error {
 		return fmt.Errorf("container '%s' is not in a valid state for starting (current state: %s)", name, container.State)
 	}
 
-	// Start the container
-	if err := m.execLXCCommand("lxc-start", "-n", name); err != nil {
+	// Start the container with debugging enabled
+	logFile := filepath.Join(m.configPath, name, "start.log")
+	if err := m.execLXCCommand("lxc-start", "-n", name, "-F", "-o", logFile, "-l", "DEBUG"); err != nil {
+		// Try to read the log file for more details
+		if logContent, readErr := os.ReadFile(logFile); readErr == nil {
+			logging.Error("Container start failed", "container", name, "logContent", string(logContent))
+		}
 		return fmt.Errorf("failed to start container: %w", err)
 	}
 
@@ -495,6 +521,309 @@ func (m *LXCManager) Update(name string, cfg *config.Container) error {
 		return fmt.Errorf("failed to apply network configuration: %w", err)
 	}
 	// Note: storage, security, env, and entrypoint are not yet implemented
+
+	return nil
+}
+
+// generateLXCConfig creates the main LXC configuration file for a container
+func (m *LXCManager) generateLXCConfig(name string, cfg *config.Container) error {
+	containerDir := filepath.Join(m.configPath, name)
+	configPath := filepath.Join(containerDir, "config")
+
+	var lines []string
+
+	// Basic container configuration
+	lines = append(lines, fmt.Sprintf("lxc.uts.name = %s", name))
+	lines = append(lines, fmt.Sprintf("lxc.rootfs.path = dir:%s/rootfs", containerDir))
+
+	// Security settings
+	if cfg.Security != nil {
+		if cfg.Security.Privileged {
+			lines = append(lines, "lxc.seccomp.profile =")
+		} else {
+			lines = append(lines, "lxc.apparmor.profile = generated")
+			lines = append(lines, "lxc.seccomp.profile = /usr/share/lxc/config/common.seccomp")
+		}
+	} else {
+		// Default to unprivileged
+		lines = append(lines, "lxc.apparmor.profile = generated")
+		lines = append(lines, "lxc.seccomp.profile = /usr/share/lxc/config/common.seccomp")
+	}
+
+	// Include common configuration
+	lines = append(lines, "lxc.include = /usr/share/lxc/config/common.conf")
+
+	// Include distribution-specific config if available
+	lines = append(lines, "lxc.include = /usr/share/lxc/config/ubuntu.common.conf")
+
+	// Add init system configuration - detect what's available
+	initCmd := m.detectInitCommand(containerDir)
+	if initCmd != "" {
+		lines = append(lines, fmt.Sprintf("lxc.init.cmd = %s", initCmd))
+		if initCmd == "/sbin/init" || strings.Contains(initCmd, "systemd") {
+			lines = append(lines, "lxc.signal.halt = SIGRTMIN+3")
+			lines = append(lines, "lxc.signal.reboot = SIGTERM")
+		}
+	}
+
+	// Basic system configuration
+	lines = append(lines, "lxc.arch = amd64")
+	lines = append(lines, "lxc.tty.max = 4")
+	lines = append(lines, "lxc.pty.max = 1024")
+
+	// Add network configuration from external file
+	networkConfigPath := filepath.Join(containerDir, "network.conf")
+	if _, err := os.Stat(networkConfigPath); err == nil {
+		lines = append(lines, fmt.Sprintf("lxc.include = %s", networkConfigPath))
+	}
+
+	// Network configuration with bridge validation
+	if cfg.Network != nil {
+		// Handle legacy network configuration directly
+		if cfg.Network.Type != "" || cfg.Network.Bridge != "" || cfg.Network.IP != "" {
+			// Determine bridge name
+			bridgeName := cfg.Network.Bridge
+			if bridgeName == "" {
+				bridgeName = "lxcbr0" // default
+			}
+
+			// Check if bridge exists before trying to use it
+			bridgeCmd := ExecCommand("ip", "link", "show", bridgeName)
+			if err := bridgeCmd.Run(); err != nil {
+				// Bridge doesn't exist, use host networking as fallback
+				logging.Debug("Bridge not found, using host networking", "bridge", bridgeName)
+				lines = append(lines, "lxc.net.0.type = none")
+			} else {
+				// Bridge exists, use it
+				logging.Debug("Using bridge for networking", "bridge", bridgeName)
+				lines = append(lines, "lxc.net.0.type = veth")
+				lines = append(lines, fmt.Sprintf("lxc.net.0.link = %s", bridgeName))
+				lines = append(lines, "lxc.net.0.flags = up")
+
+				if cfg.Network.IP != "" {
+					lines = append(lines, fmt.Sprintf("lxc.net.0.ipv4.address = %s", cfg.Network.IP))
+					if cfg.Network.Gateway != "" {
+						lines = append(lines, fmt.Sprintf("lxc.net.0.ipv4.gateway = %s", cfg.Network.Gateway))
+					}
+				}
+			}
+			// DNS configuration is handled via resolv.conf instead of LXC network config
+			// LXC doesn't support lxc.net.0.ipv4.nameserver.X syntax in modern versions
+		}
+	} else {
+		// No network configuration specified, use host networking
+		logging.Debug("No network configuration, using host networking")
+		lines = append(lines, "lxc.net.0.type = none")
+	}
+
+	// Resource limits - use cgroup v1 syntax for broader compatibility
+	if cfg.Resources != nil {
+		if cfg.Resources.Memory != "" {
+			// Try cgroup v2 first, fallback handled by LXC
+			lines = append(lines, fmt.Sprintf("lxc.cgroup.memory.limit_in_bytes = %s", cfg.Resources.Memory))
+		}
+		if cfg.Resources.Cores > 0 {
+			// Set CPU limits using cgroup v1 syntax for compatibility
+			lines = append(lines, fmt.Sprintf("lxc.cgroup.cpuset.cpus = 0-%d", cfg.Resources.Cores-1))
+		}
+	}
+
+	// Environment variables
+	for key, value := range cfg.Environment {
+		lines = append(lines, fmt.Sprintf("lxc.environment = %s=%s", key, value))
+	}
+
+	// Autostart
+	lines = append(lines, "lxc.start.auto = 0")
+
+	// DNS configuration via resolv.conf bind mount if DNS servers are specified
+	if cfg.Network != nil && len(cfg.Network.DNS) > 0 {
+		if err := m.configureDNS(containerDir, cfg.Network.DNS); err != nil {
+			logging.Error("Failed to configure DNS", "container", name, "error", err)
+		} else {
+			// Bind mount the custom resolv.conf
+			resolvConfPath := filepath.Join(containerDir, "resolv.conf")
+			lines = append(lines, fmt.Sprintf("lxc.mount.entry = %s etc/resolv.conf none bind,ro 0 0", resolvConfPath))
+		}
+	}
+
+	// Write the configuration file
+	content := strings.Join(lines, "\n") + "\n"
+	if err := os.WriteFile(configPath, []byte(content), 0644); err != nil {
+		return fmt.Errorf("failed to write LXC config file: %w", err)
+	}
+
+	logging.Debug("Generated LXC config file", "container", name, "path", configPath)
+	return nil
+}
+
+// detectInitCommand determines the best init command for the container
+func (m *LXCManager) detectInitCommand(containerDir string) string {
+	rootfsPath := filepath.Join(containerDir, "rootfs")
+
+	// Check for available init commands in order of preference
+	initCandidates := []string{
+		"/sbin/init",
+		"/usr/sbin/init",
+		"/bin/systemd",
+		"/usr/bin/systemd",
+		"/bin/bash",
+		"/bin/sh",
+	}
+
+	for _, candidate := range initCandidates {
+		// Remove leading slash to avoid double slash in path
+		candidateRelPath := strings.TrimPrefix(candidate, "/")
+		candidatePath := filepath.Join(rootfsPath, candidateRelPath)
+		if info, err := os.Stat(candidatePath); err == nil && !info.IsDir() {
+			// Check if it's executable
+			if info.Mode()&0111 != 0 {
+				logging.Debug("Found init command", "container", filepath.Base(containerDir), "init", candidate)
+				return candidate
+			}
+		}
+	}
+
+	// If no init found, try to install systemd for Ubuntu containers
+	if m.installSystemdIfNeeded(rootfsPath) {
+		// Check again for /sbin/init after installation
+		if _, err := os.Stat(filepath.Join(rootfsPath, "sbin/init")); err == nil {
+			logging.Debug("Installed systemd, using /sbin/init", "container", filepath.Base(containerDir))
+			return "/sbin/init"
+		}
+	}
+
+	logging.Warn("No suitable init command found", "container", filepath.Base(containerDir))
+	return "" // Let LXC use its default
+}
+
+// installSystemdIfNeeded attempts to install systemd in Ubuntu containers
+func (m *LXCManager) installSystemdIfNeeded(rootfsPath string) bool {
+	// Check if this is an Ubuntu system
+	osReleasePath := filepath.Join(rootfsPath, "etc", "os-release")
+	if data, err := os.ReadFile(osReleasePath); err == nil {
+		content := string(data)
+		if strings.Contains(content, "Ubuntu") {
+			logging.Debug("Detected Ubuntu container, attempting to install systemd")
+
+			// Use chroot to install systemd
+			cmd := ExecCommand("chroot", rootfsPath, "sh", "-c",
+				"export DEBIAN_FRONTEND=noninteractive && "+
+					"apt-get update -qq >/dev/null 2>&1 && "+
+					"apt-get install -y systemd systemd-sysv >/dev/null 2>&1")
+
+			if err := cmd.Run(); err != nil {
+				logging.Debug("Failed to install systemd via chroot", "error", err)
+				return false
+			}
+
+			logging.Debug("Successfully installed systemd")
+			return true
+		}
+	}
+
+	return false
+}
+
+// configureDNS creates a custom resolv.conf for the container
+func (m *LXCManager) configureDNS(containerDir string, dnsServers []string) error {
+	resolvConfPath := filepath.Join(containerDir, "resolv.conf")
+
+	var lines []string
+	for _, dns := range dnsServers {
+		lines = append(lines, fmt.Sprintf("nameserver %s", dns))
+	}
+
+	// Add default search domain
+	lines = append(lines, "search localdomain")
+
+	content := strings.Join(lines, "\n") + "\n"
+	if err := os.WriteFile(resolvConfPath, []byte(content), 0644); err != nil {
+		return fmt.Errorf("failed to write resolv.conf: %w", err)
+	}
+
+	return nil
+}
+
+// setupContainerInit sets up the container for proper initialization
+func (m *LXCManager) setupContainerInit(rootfsPath string) error {
+	// Create necessary directories for container operation
+	dirs := []string{
+		"dev", "proc", "sys", "tmp", "var/run", "var/lock", "var/log", "run", "run/lock",
+	}
+
+	for _, dir := range dirs {
+		dirPath := filepath.Join(rootfsPath, dir)
+		if err := os.MkdirAll(dirPath, 0755); err != nil {
+			return fmt.Errorf("failed to create directory %s: %w", dir, err)
+		}
+	}
+
+	// Check if this looks like an Ubuntu rootfs and handle accordingly
+	if _, err := os.Stat(filepath.Join(rootfsPath, "usr", "bin", "systemctl")); err == nil {
+		// This appears to be a systemd-based system (Ubuntu 20.04+)
+		logging.Debug("Detected systemd-based rootfs, setting up for systemd init")
+
+		// Create systemd directories
+		systemdDirs := []string{
+			"run/systemd", "var/lib/systemd", "etc/systemd/system",
+		}
+		for _, dir := range systemdDirs {
+			dirPath := filepath.Join(rootfsPath, dir)
+			if err := os.MkdirAll(dirPath, 0755); err != nil {
+				logging.Debug("Could not create systemd directory", "dir", dir, "error", err)
+			}
+		}
+	} else {
+		// Fallback to traditional init system
+		logging.Debug("Setting up traditional init system")
+
+		// Create minimal /etc/inittab for simple init
+		inittabPath := filepath.Join(rootfsPath, "etc", "inittab")
+		inittabContent := `# /etc/inittab: init(8) configuration.
+id:3:initdefault:
+si::sysinit:/etc/init.d/rcS
+l0:0:wait:/etc/init.d/rc 0
+l1:1:wait:/etc/init.d/rc 1
+l2:2:wait:/etc/init.d/rc 2
+l3:3:wait:/etc/init.d/rc 3
+l4:4:wait:/etc/init.d/rc 4
+l5:5:wait:/etc/init.d/rc 5
+l6:6:wait:/etc/init.d/rc 6
+1:2345:respawn:/sbin/getty 38400 console
+c1:12345:respawn:/sbin/getty 38400 tty1 linux
+`
+		if err := os.WriteFile(inittabPath, []byte(inittabContent), 0644); err != nil {
+			logging.Debug("Could not create inittab", "error", err)
+		}
+	}
+
+	// Ensure proper permissions on key directories
+	keyDirs := map[string]os.FileMode{
+		"tmp":     0777,
+		"var/run": 0755,
+		"var/log": 0755,
+		"run":     0755,
+	}
+
+	for dir, mode := range keyDirs {
+		dirPath := filepath.Join(rootfsPath, dir)
+		if err := os.Chmod(dirPath, mode); err != nil {
+			logging.Debug("Could not set permissions", "dir", dir, "error", err)
+		}
+	}
+
+	// Verify rootfs structure
+	logging.Debug("Rootfs setup completed", "rootfsPath", rootfsPath)
+	if entries, err := os.ReadDir(rootfsPath); err == nil {
+		var dirNames []string
+		for _, entry := range entries {
+			if entry.IsDir() {
+				dirNames = append(dirNames, entry.Name())
+			}
+		}
+		logging.Debug("Rootfs directories", "directories", strings.Join(dirNames, ", "))
+	}
 
 	return nil
 }
