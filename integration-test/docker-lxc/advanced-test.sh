@@ -32,6 +32,9 @@ fi
 
 # Test invalid config (if exists)
 if [ -f "invalid-config.yml" ]; then
+    echo "Testing with invalid-config.yml:"
+    cat invalid-config.yml | head -3
+    echo "..."
     if /var/tmp/lxc-compose --config invalid-config.yml ps >/dev/null 2>&1; then
         echo "⚠️  Invalid configuration accepted (should fail)"
     else

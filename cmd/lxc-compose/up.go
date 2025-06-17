@@ -36,6 +36,11 @@ func upCmdRunE(_ *cobra.Command, args []string) error {
 		return fmt.Errorf("failed to load config: %w", err)
 	}
 
+	// Validate configuration
+	if err := config.ValidateConfig(cfg); err != nil {
+		return fmt.Errorf("configuration validation failed: %w", err)
+	}
+
 	// Create container manager
 	manager, err := container.NewLXCManager("/var/lib/lxc")
 	if err != nil {

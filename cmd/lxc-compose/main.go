@@ -53,6 +53,10 @@ func initConfig() {
 
 	if err := viper.ReadInConfig(); err == nil {
 		logging.Info("Using config file", "path", viper.ConfigFileUsed())
+	} else if cfgFile != "" {
+		// If a specific config file was requested but not found, that's an error
+		logging.Error("Failed to read specified config file", "path", cfgFile, "error", err)
+		os.Exit(1)
 	}
 }
 

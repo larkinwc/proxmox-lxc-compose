@@ -90,12 +90,21 @@ func (m *LXCManager) execLXCCommand(name string, args ...string) error {
 		}
 
 		if err != nil {
-			logging.Error("Command failed",
-				"command", name,
-				"args", args,
-				"output", string(output),
-				"error", err,
-			)
+			// Use debug level for expected failures like container non-existence
+			if name == "lxc-info" && strings.Contains(string(output), "doesn't exist") {
+				logging.Debug("Container does not exist (expected)",
+					"command", name,
+					"args", args,
+					"output", string(output),
+				)
+			} else {
+				logging.Error("Command failed",
+					"command", name,
+					"args", args,
+					"output", string(output),
+					"error", err,
+				)
+			}
 			return fmt.Errorf("command failed: %w", err)
 		}
 		return nil

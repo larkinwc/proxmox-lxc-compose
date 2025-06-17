@@ -5,6 +5,7 @@ import (
 	"os"
 	"text/tabwriter"
 
+	"github.com/larkinwc/proxmox-lxc-compose/pkg/config"
 	"github.com/larkinwc/proxmox-lxc-compose/pkg/container"
 
 	"github.com/spf13/cobra"
@@ -14,7 +15,26 @@ func init() {
 	var psCmd = &cobra.Command{
 		Use:   "ps",
 		Short: "List containers",
-		RunE: func(_ *cobra.Command, _ []string) error {
+		RunE: func(cmd *cobra.Command, _ []string) error {
+			// Get config file from flag or use default
+			configFile := cmd.Flag("config").Value.String()
+			if configFile == "" {
+				configFile = "lxc-compose.yml"
+			}
+
+			// Load and validate configuration if file exists
+			if _, err := os.Stat(configFile); err == nil {
+				cfg, err := config.Load(configFile)
+				if err != nil {
+					return fmt.Errorf("failed to load config: %w", err)
+				}
+
+				// Validate configuration
+				if err := config.ValidateConfig(cfg); err != nil {
+					return fmt.Errorf("configuration validation failed: %w", err)
+				}
+			}
+
 			// Create container manager
 			manager, err := container.NewLXCManager("/var/lib/lxc")
 			if err != nil {
