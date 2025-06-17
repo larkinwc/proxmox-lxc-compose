@@ -26,7 +26,7 @@ jobs:
         go build -buildvcs=false -o lxc-compose ./cmd/lxc-compose/
     
     - name: Upload binary artifact
-      uses: actions/upload-artifact@v3
+      uses: actions/upload-artifact@v4
       with:
         name: lxc-compose-binary
         path: lxc-compose
@@ -74,7 +74,7 @@ jobs:
         sudo lxc-destroy -n test-basic || true
     
     - name: Download binary artifact
-      uses: actions/download-artifact@v3
+      uses: actions/download-artifact@v4
       with:
         name: lxc-compose-binary
     
@@ -152,7 +152,7 @@ jobs:
         go build -buildvcs=false -o lxc-compose-${{ matrix.goos }}-${{ matrix.goarch }} ./cmd/lxc-compose/
     
     - name: Upload multiarch binary
-      uses: actions/upload-artifact@v3
+      uses: actions/upload-artifact@v4
       with:
         name: lxc-compose-${{ matrix.goos }}-${{ matrix.goarch }}
         path: lxc-compose-${{ matrix.goos }}-${{ matrix.goarch }}
@@ -166,7 +166,7 @@ jobs:
     - uses: actions/checkout@v4
     
     - name: Download all artifacts
-      uses: actions/download-artifact@v3
+      uses: actions/download-artifact@v4
     
     - name: List artifacts
       run: |
