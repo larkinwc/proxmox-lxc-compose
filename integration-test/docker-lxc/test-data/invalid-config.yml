@@ -1,0 +1,7 @@
+# Invalid YAML syntax - should cause parsing errors
+services:
+  invalid-container:
+    image: # Empty value
+    invalid-key: [unclosed array
+    memory: "not-a-valid-memory-format"
+  bad-indent: "improper nesting" 

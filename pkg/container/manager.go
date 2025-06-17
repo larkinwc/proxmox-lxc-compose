@@ -12,6 +12,7 @@ import (
 	"github.com/larkinwc/proxmox-lxc-compose/pkg/config"
 	"github.com/larkinwc/proxmox-lxc-compose/pkg/internal/recovery"
 	"github.com/larkinwc/proxmox-lxc-compose/pkg/logging"
+	"github.com/larkinwc/proxmox-lxc-compose/pkg/oci"
 )
 
 // Manager defines the interface for managing LXC containers
@@ -142,6 +143,21 @@ func (m *LXCManager) Create(name string, cfg *common.Container) error {
 		}
 	}
 
+	// Pull and convert the OCI image
+	if cfg.Image != "" {
+		// Convert the image to LXC format
+		templatePath := filepath.Join(m.configPath, "templates", fmt.Sprintf("%s.tar.gz", cfg.Image))
+		if err := oci.ConvertOCIToLXC(cfg.Image, templatePath); err != nil {
+			return fmt.Errorf("failed to convert image: %w", err)
+		}
+
+		// Extract the template to the rootfs
+		rootfsPath := filepath.Join(containerDir, "rootfs")
+		if err := m.execLXCCommand("tar", "-xzf", templatePath, "-C", rootfsPath); err != nil {
+			return fmt.Errorf("failed to extract rootfs: %w", err)
+		}
+	}
+
 	// Apply container configuration
 	if err := m.applyConfig(name, cfg); err != nil {
 		return fmt.Errorf("failed to apply container configuration: %w", err)
@@ -235,12 +251,13 @@ func (m *LXCManager) Remove(name string) error {
 		return fmt.Errorf("container '%s' must be stopped before removal", name)
 	}
 
-	// Destroy container in LXC
-	if err := m.execLXCCommand("lxc-destroy", "-n", name); err != nil {
-		return fmt.Errorf("failed to destroy container: %w", err)
+	// Try to destroy container in LXC - use force flag to handle corrupted configs
+	if err := m.execLXCCommand("lxc-destroy", "-n", name, "-f"); err != nil {
+		// If lxc-destroy fails, log the error but continue with manual cleanup
+		logging.Error("LXC destroy failed, attempting manual cleanup", "container", name, "error", err)
 	}
 
-	// Remove container directory
+	// Remove container directory (this cleans up corrupted containers)
 	containerPath := filepath.Join(m.configPath, name)
 	if err := os.RemoveAll(containerPath); err != nil {
 		return fmt.Errorf("failed to remove container directory: %w", err)

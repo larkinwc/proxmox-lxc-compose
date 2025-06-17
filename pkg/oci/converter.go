@@ -30,32 +30,32 @@ func ConvertOCIToLXC(imageName, outputPath string) error {
 
 	// Run container in background
 	runCmd := exec.Command("docker", "run", "--rm", "--entrypoint", "sh", "-id", imageName)
-	containerID, err := runCmd.Output()
+	containerIDBytes, err := runCmd.Output()
 	if err != nil {
 		return fmt.Errorf("failed to start container: %w", err)
 	}
-	containerIDStr := string(containerID)[:12]
 
-	// Cleanup container on exit
-	defer func() {
-		if err := exec.Command("docker", "kill", containerIDStr).Run(); err != nil {
-			// We're in a defer, so just log the error
-			fmt.Printf("Warning: failed to kill container %s: %v\n", containerIDStr, err)
-		}
-	}()
-
-	// Export container filesystem
-	exportCmd := exec.Command("docker", "export", containerIDStr)
-	exportFile, err := os.Create(outputPath)
-	if err != nil {
-		return fmt.Errorf("failed to create output file: %w", err)
+	// Properly trim whitespace and get full container ID
+	containerIDStr := string(containerIDBytes)
+	if len(containerIDStr) > 0 && containerIDStr[len(containerIDStr)-1] == '\n' {
+		containerIDStr = containerIDStr[:len(containerIDStr)-1]
 	}
-	defer exportFile.Close()
 
-	exportCmd.Stdout = exportFile
+	// Export container filesystem and compress it using a simpler approach
+	// Use shell to pipe docker export directly to gzip
+	exportCmd := exec.Command("sh", "-c", fmt.Sprintf("docker export %s | gzip > %s", containerIDStr, outputPath))
+	exportCmd.Stdout = os.Stdout
 	exportCmd.Stderr = os.Stderr
+
 	if err := exportCmd.Run(); err != nil {
-		return fmt.Errorf("failed to export container: %w", err)
+		// Cleanup container on error
+		exec.Command("docker", "kill", containerIDStr).Run()
+		return fmt.Errorf("failed to export and compress container: %w", err)
+	}
+
+	// Cleanup container after successful export
+	if err := exec.Command("docker", "kill", containerIDStr).Run(); err != nil {
+		fmt.Printf("Warning: failed to cleanup container %s: %v\n", containerIDStr, err)
 	}
 
 	return nil

@@ -1,0 +1,42 @@
+version: '3.8'
+
+services:
+  lxc-test-env:
+    build: .
+    container_name: lxc-integration-test
+    privileged: true
+    ports:
+      - "2222:22"
+    volumes:
+      # Project mounts
+      - ./test-data:/opt/lxc-compose-test/test-data
+      - ../../:/opt/lxc-compose-test/source:ro
+      - ./basic-test.sh:/opt/lxc-compose-test/basic-test.sh:ro
+      - ./simple-test.sh:/opt/lxc-compose-test/simple-test.sh:ro
+      - ./hybrid-test.sh:/opt/lxc-compose-test/hybrid-test.sh:ro
+      - ./unit-test.sh:/opt/lxc-compose-test/unit-test.sh:ro
+      - ./advanced-test.sh:/opt/lxc-compose-test/advanced-test.sh:ro
+      - ./mock-lxc-test.sh:/opt/lxc-compose-test/mock-lxc-test.sh:ro
+      # Systemd support
+      - /sys/fs/cgroup:/sys/fs/cgroup:ro
+    environment:
+      - CONTAINER_CONFIG_PATH=/var/lib/lxc
+    networks:
+      - lxc-net
+    cap_add:
+      - SYS_ADMIN
+      - NET_ADMIN
+      - MKNOD
+    security_opt:
+      - apparmor:unconfined
+    tmpfs:
+      - /tmp:exec
+      - /run
+      - /run/lock
+    # Keep the original entrypoint for backward compatibility
+    # but allow systemd to work if needed
+    entrypoint: ["/usr/local/bin/start-services.sh"]
+
+networks:
+  lxc-net:
+    driver: bridge

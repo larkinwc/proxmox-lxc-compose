@@ -1,0 +1,101 @@
+# Systemd-enabled Docker container for LXC testing
+# WARNING: This is complex and has limitations compared to real VMs
+FROM ubuntu:22.04
+
+# Prevent interactive prompts during installation
+ENV DEBIAN_FRONTEND=noninteractive
+
+# Install systemd first (essential for proper init)
+RUN apt-get update && apt-get install -y \
+    systemd \
+    systemd-sysv \
+    dbus \
+    && apt-get clean \
+    && rm -rf /var/lib/apt/lists/*
+
+# Install LXC and dependencies
+RUN apt-get update && apt-get install -y \
+    lxc \
+    lxc-utils \
+    lxc-templates \
+    bridge-utils \
+    debootstrap \
+    rsync \
+    wget \
+    curl \
+    openssh-server \
+    sudo \
+    git \
+    build-essential \
+    iptables \
+    ca-certificates \
+    gnupg \
+    lsb-release \
+    && rm -rf /var/lib/apt/lists/*
+
+# Install Go 1.23.4
+RUN wget -q https://go.dev/dl/go1.23.4.linux-amd64.tar.gz && \
+    tar -C /usr/local -xzf go1.23.4.linux-amd64.tar.gz && \
+    rm go1.23.4.linux-amd64.tar.gz && \
+    ln -s /usr/local/go/bin/go /usr/local/bin/go && \
+    ln -s /usr/local/go/bin/gofmt /usr/local/bin/gofmt
+
+# Ensure Go binaries are in PATH
+ENV PATH="/usr/local/go/bin:${PATH}"
+
+# Configure systemd (remove unnecessary services that cause issues in containers)
+RUN systemctl mask \
+    systemd-networkd.socket \
+    systemd-networkd \
+    systemd-networkd-resolvconf-update.path \
+    systemd-networkd-resolvconf-update.service \
+    systemd-resolved \
+    systemd-timesyncd \
+    systemd-logind \
+    getty.target \
+    getty@tty1.service
+
+# Configure LXC
+RUN echo 'lxc.net.0.type = veth' >> /etc/lxc/default.conf && \
+    echo 'lxc.net.0.link = lxcbr0' >> /etc/lxc/default.conf && \
+    echo 'lxc.net.0.flags = up' >> /etc/lxc/default.conf && \
+    echo 'lxc.apparmor.profile = generated' >> /etc/lxc/default.conf && \
+    echo 'lxc.apparmor.allow_nesting = 1' >> /etc/lxc/default.conf
+
+# Create LXC bridge configuration
+RUN mkdir -p /etc/default && \
+    echo 'USE_LXC_BRIDGE="true"' > /etc/default/lxc-net && \
+    echo 'LXC_BRIDGE="lxcbr0"' >> /etc/default/lxc-net && \
+    echo 'LXC_ADDR="10.0.3.1"' >> /etc/default/lxc-net && \
+    echo 'LXC_NETMASK="255.255.255.0"' >> /etc/default/lxc-net && \
+    echo 'LXC_NETWORK="10.0.3.0/24"' >> /etc/default/lxc-net && \
+    echo 'LXC_DHCP_RANGE="10.0.3.2,10.0.3.254"' >> /etc/default/lxc-net && \
+    echo 'LXC_DHCP_MAX="253"' >> /etc/default/lxc-net
+
+# Enable LXC networking service
+RUN systemctl enable lxc-net
+
+# Create test user
+RUN useradd -m -s /bin/bash testuser && \
+    echo 'testuser:testpass' | chpasswd && \
+    usermod -aG sudo testuser && \
+    echo 'testuser ALL=(ALL) NOPASSWD:ALL' >> /etc/sudoers
+
+# Configure SSH
+RUN mkdir -p /var/run/sshd && \
+    echo 'PermitRootLogin yes' >> /etc/ssh/sshd_config && \
+    echo 'PasswordAuthentication yes' >> /etc/ssh/sshd_config && \
+    systemctl enable ssh
+
+# Create systemd startup script
+COPY systemd-startup.sh /usr/local/bin/
+RUN chmod +x /usr/local/bin/systemd-startup.sh
+
+# Create test directory
+RUN mkdir -p /opt/lxc-compose-test
+WORKDIR /opt/lxc-compose-test
+
+EXPOSE 22
+
+# Systemd needs to be PID 1
+ENTRYPOINT ["/usr/local/bin/systemd-startup.sh"] 

@@ -1,0 +1,42 @@
+version: '3.8'
+
+services:
+  lxc-systemd-test:
+    build:
+      context: .
+      dockerfile: Dockerfile.systemd
+    container_name: lxc-systemd-integration-test
+    privileged: true
+    ports:
+      - "2223:22"
+    volumes:
+      # Essential systemd mounts
+      - /sys/fs/cgroup:/sys/fs/cgroup:rw
+      - /tmp/.X11-unix:/tmp/.X11-unix:rw
+      # Project mounts
+      - ./test-data:/opt/lxc-compose-test/test-data
+      - ../../:/opt/lxc-compose-test/source:ro
+      - ./systemd-test.sh:/opt/lxc-compose-test/systemd-test.sh:ro
+    environment:
+      - CONTAINER_CONFIG_PATH=/var/lib/lxc
+    networks:
+      - lxc-systemd-net
+    cap_add:
+      - SYS_ADMIN
+      - NET_ADMIN
+      - SYS_PTRACE
+      - MKNOD
+      - AUDIT_WRITE
+    security_opt:
+      - apparmor:unconfined
+      - seccomp:unconfined
+    devices:
+      - "/dev/fuse:/dev/fuse"
+    tmpfs:
+      - /tmp:exec,mode=1777
+      - /run:exec,mode=0755
+      - /run/lock:exec,mode=1777
+
+networks:
+  lxc-systemd-net:
+    driver: bridge 

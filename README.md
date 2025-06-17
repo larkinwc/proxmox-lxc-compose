@@ -280,6 +280,25 @@ The tool supports comprehensive security configuration for containers:
       - SYS_TIME
   ```
 
+## Testing
+
+### Quick Start Testing
+
+```bash
+cd integration-test
+./quick-test.sh           # Interactive test menu
+./setup-env.sh           # Configure SSH testing (first time)
+```
+
+### Testing Methods
+
+1. **SSH Testing** (Most Accurate) - Tests on real Proxmox/LXC hosts
+2. **Multipass VM** - Clean Ubuntu VMs with native LXC
+3. **Docker Testing** - Fast validation with containerized LXC
+4. **Vagrant VM** - Traditional full VM testing
+
+See [integration-test/README.md](integration-test/README.md) for detailed testing documentation.
+
 ## Development
 
 ### Prerequisites

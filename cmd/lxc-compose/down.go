@@ -12,13 +12,17 @@ import (
 var removeContainers bool
 
 func init() {
+	var configFile string
+
 	var downCmd = &cobra.Command{
 		Use:   "down [service...]",
 		Short: "Stop and optionally remove containers",
 		Long: `Stop containers defined in the lxc-compose.yml file.
 If service names are provided, only those services will be stopped.
 Use --rm to also remove the containers.`,
-		RunE: downCmdRunE,
+		RunE: func(cmd *cobra.Command, args []string) error {
+			return downCmdRunE(cmd, args, configFile)
+		},
 	}
 
 	downCmd.Flags().StringVarP(&configFile, "file", "f", "", "Specify an alternate compose file (default: lxc-compose.yml)")
@@ -26,19 +30,20 @@ Use --rm to also remove the containers.`,
 	rootCmd.AddCommand(downCmd)
 }
 
-func downCmdRunE(_ *cobra.Command, args []string) error {
+func downCmdRunE(_ *cobra.Command, args []string, configFile string) error {
+	// Use default config file if not specified
+	if configFile == "" {
+		configFile = "lxc-compose.yml"
+	}
+
 	// Load configuration
 	cfg, err := common.Load(configFile)
 	if err != nil {
 		return fmt.Errorf("failed to load config: %w", err)
 	}
 
-	// Convert to compose config type
-	var compose common.ComposeConfig
-	compose.Services = make(map[string]common.Container)
-	if cfg != nil {
-		compose.Services["default"] = cfg.Services["default"]
-	}
+	// Use the loaded config directly
+	compose := cfg
 
 	// Create container manager
 	manager, err := container.NewLXCManager("/var/lib/lxc")
@@ -61,7 +66,12 @@ func downCmdRunE(_ *cobra.Command, args []string) error {
 
 		fmt.Printf("Stopping container '%s'...\n", name)
 		if err := manager.Stop(name); err != nil {
-			return fmt.Errorf("failed to stop container '%s': %w", name, err)
+			// If container is already stopped, that's fine, continue to removal if requested
+			if !removeContainers {
+				return fmt.Errorf("failed to stop container '%s': %w", name, err)
+			}
+			// For removal operations, log the stop error but continue
+			fmt.Printf("Warning: %v\n", err)
 		}
 
 		if removeContainers {

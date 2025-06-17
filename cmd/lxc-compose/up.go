@@ -25,6 +25,11 @@ If service names are provided, only those services will be started.`,
 }
 
 func upCmdRunE(_ *cobra.Command, args []string) error {
+	// Use default config file if not specified
+	if configFile == "" {
+		configFile = "lxc-compose.yml"
+	}
+
 	// Load configuration
 	cfg, err := common.Load(configFile)
 	if err != nil {

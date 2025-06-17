@@ -1,0 +1,57 @@
+Vagrant.configure("2") do |config|
+  config.vm.box = "ubuntu/jammy64"
+  config.vm.hostname = "lxc-test-host"
+  
+  # Configure VM resources
+  config.vm.provider "virtualbox" do |vb|
+    vb.memory = "4096"
+    vb.cpus = 2
+    vb.name = "lxc-compose-integration"
+    
+    # Enable nested virtualization
+    vb.customize ["modifyvm", :id, "--nested-hw-virt", "on"]
+    vb.customize ["modifyvm", :id, "--paravirtprovider", "kvm"]
+  end
+  
+  # Network configuration
+  config.vm.network "private_network", ip: "192.168.56.10"
+  config.vm.network "forwarded_port", guest: 22, host: 2223
+  
+  # Sync folders
+  config.vm.synced_folder "../../", "/opt/lxc-compose-source"
+  config.vm.synced_folder "../docker-lxc/test-data", "/opt/test-data"
+  
+  # Provisioning script
+  config.vm.provision "shell", inline: <<-SHELL
+    # Update system
+    apt-get update
+    
+    # Install LXC and dependencies
+    apt-get install -y lxc lxc-utils lxc-templates bridge-utils
+    apt-get install -y golang-go git build-essential
+    
+    # Configure LXC networking
+    echo 'USE_LXC_BRIDGE="true"' > /etc/default/lxc-net
+    echo 'LXC_BRIDGE="lxcbr0"' >> /etc/default/lxc-net
+    echo 'LXC_ADDR="10.0.3.1"' >> /etc/default/lxc-net
+    echo 'LXC_NETMASK="255.255.255.0"' >> /etc/default/lxc-net
+    echo 'LXC_NETWORK="10.0.3.0/24"' >> /etc/default/lxc-net
+    echo 'LXC_DHCP_RANGE="10.0.3.2,10.0.3.254"' >> /etc/default/lxc-net
+    
+    # Start LXC networking
+    systemctl enable lxc-net
+    systemctl start lxc-net
+    
+    # Build lxc-compose
+    cd /opt/lxc-compose-source
+    go build -o /usr/local/bin/lxc-compose ./cmd/lxc-compose/
+    
+    # Make it executable
+    chmod +x /usr/local/bin/lxc-compose
+    
+    echo "✅ LXC integration environment ready!"
+    echo "🔧 Run 'vagrant ssh' to access the environment"
+    echo "📁 Source code is in /opt/lxc-compose-source"
+    echo "📋 Test data is in /opt/test-data"
+  SHELL
+end
