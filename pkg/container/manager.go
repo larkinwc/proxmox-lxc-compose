@@ -8,17 +8,17 @@ import (
 	"strings"
 	"time"
 
-	"github.com/larkinwc/proxmox-lxc-compose/pkg/common"
 	"github.com/larkinwc/proxmox-lxc-compose/pkg/config"
 	"github.com/larkinwc/proxmox-lxc-compose/pkg/internal/recovery"
 	"github.com/larkinwc/proxmox-lxc-compose/pkg/logging"
 	"github.com/larkinwc/proxmox-lxc-compose/pkg/oci"
+	"github.com/larkinwc/proxmox-lxc-compose/pkg/proxmox"
 )
 
 // Manager defines the interface for managing LXC containers
 type Manager interface {
 	// Create creates a new container from the given configuration
-	Create(name string, cfg *common.Container) error
+	Create(name string, cfg *config.Container) error
 	// Start starts a container
 	Start(name string) error
 	// Stop stops a container
@@ -36,13 +36,14 @@ type Manager interface {
 	// Restart stops and then starts a container
 	Restart(name string) error
 	// Update updates a container's configuration
-	Update(name string, cfg *common.Container) error
+	Update(name string, cfg *config.Container) error
 }
 
 // LXCManager implements the Manager interface for LXC containers
 type LXCManager struct {
 	configPath string
 	state      *StateManager
+	client     proxmox.Client
 }
 
 // NewLXCManager creates a new LXC container manager
@@ -54,9 +55,16 @@ func NewLXCManager(configPath string) (*LXCManager, error) {
 		return nil, fmt.Errorf("failed to create state manager: %w", err)
 	}
 
+	// Initialize the Proxmox client
+	client, err := proxmox.NewClient()
+	if err != nil {
+		return nil, fmt.Errorf("failed to create proxmox client: %w", err)
+	}
+
 	return &LXCManager{
 		configPath: configPath,
 		state:      stateManager,
+		client:     client,
 	}, nil
 }
 
@@ -115,14 +123,9 @@ func (m *LXCManager) ContainerExists(name string) bool {
 }
 
 // Create implements Manager.Create
-func (m *LXCManager) Create(name string, cfg *common.Container) error {
+func (m *LXCManager) Create(name string, cfg *config.Container) error {
 	if cfg == nil {
 		return fmt.Errorf("container configuration is required")
-	}
-
-	// Validate container configuration
-	if err := validateContainerConfig(cfg); err != nil {
-		return fmt.Errorf("invalid container configuration: %w", err)
 	}
 
 	if m.ContainerExists(name) {
@@ -159,23 +162,24 @@ func (m *LXCManager) Create(name string, cfg *common.Container) error {
 	}
 
 	// Apply container configuration
-	if err := m.applyConfig(name, cfg); err != nil {
-		return fmt.Errorf("failed to apply container configuration: %w", err)
+	if cfg.Resources != nil {
+		if err := m.applyCPUConfig(name, &config.CPUConfig{Cores: &cfg.Resources.Cores}); err != nil {
+			return fmt.Errorf("failed to apply CPU configuration: %w", err)
+		}
+		if err := m.applyMemoryConfig(name, &config.MemoryConfig{Limit: cfg.Resources.Memory}); err != nil {
+			return fmt.Errorf("failed to apply memory configuration: %w", err)
+		}
 	}
-
-	// Convert common.Container to config.Container for state saving
-	configContainer := config.FromCommonContainer(cfg)
 
 	// Configure network if specified
 	if cfg.Network != nil {
-		networkCfg := config.FromCommonNetworkConfig(cfg.Network)
-		if err := m.configureNetwork(name, networkCfg); err != nil {
+		if err := m.configureNetwork(name, cfg.Network); err != nil {
 			return fmt.Errorf("failed to configure network: %w", err)
 		}
 	}
 
 	// Save initial state
-	if err := m.state.SaveContainerState(name, configContainer, "STOPPED"); err != nil {
+	if err := m.state.SaveContainerState(name, cfg, "STOPPED"); err != nil {
 		return fmt.Errorf("failed to save container state: %w", err)
 	}
 
@@ -449,9 +453,14 @@ func (m *LXCManager) Restart(name string) error {
 }
 
 // Update implements Manager.Update
-func (m *LXCManager) Update(name string, cfg *common.Container) error {
+func (m *LXCManager) Update(name string, cfg *config.Container) error {
 	if cfg == nil {
 		return fmt.Errorf("container configuration is required")
+	}
+
+	// Check if container exists
+	if !m.ContainerExists(name) {
+		return fmt.Errorf("container %s does not exist", name)
 	}
 
 	container, err := m.Get(name)
@@ -459,10 +468,24 @@ func (m *LXCManager) Update(name string, cfg *common.Container) error {
 		return fmt.Errorf("failed to get container: %w", err)
 	}
 
-	// Convert common.Container to config.Container for state saving
-	configContainer := config.FromCommonContainer(cfg)
-	if err := m.state.SaveContainerState(name, configContainer, container.State); err != nil {
+	// Save initial state
+	if err := m.state.SaveContainerState(name, cfg, container.State); err != nil {
 		return fmt.Errorf("failed to save container state: %w", err)
 	}
+
+	// Apply new configuration
+	if cfg.Resources != nil {
+		if err := m.applyCPUConfig(name, &config.CPUConfig{Cores: &cfg.Resources.Cores}); err != nil {
+			return fmt.Errorf("failed to apply CPU configuration: %w", err)
+		}
+		if err := m.applyMemoryConfig(name, &config.MemoryConfig{Limit: cfg.Resources.Memory}); err != nil {
+			return fmt.Errorf("failed to apply memory configuration: %w", err)
+		}
+	}
+	if err := m.configureNetwork(name, cfg.Network); err != nil {
+		return fmt.Errorf("failed to apply network configuration: %w", err)
+	}
+	// Note: storage, security, env, and entrypoint are not yet implemented
+
 	return nil
 }

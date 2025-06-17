@@ -9,14 +9,14 @@ import (
 	"strings"
 	"time"
 
-	"github.com/larkinwc/proxmox-lxc-compose/pkg/common"
+	"github.com/larkinwc/proxmox-lxc-compose/pkg/config"
 )
 
 // Template represents a container template
 type Template struct {
 	Name        string            `json:"name"`
 	Description string            `json:"description"`
-	Config      *common.Container `json:"config"`
+	Config      *config.Container `json:"config"`
 	CreatedAt   time.Time         `json:"created_at"`
 }
 
@@ -47,16 +47,11 @@ func (m *LXCManager) CreateTemplate(containerName string, templateName string, d
 		return fmt.Errorf("failed to copy container files: %w", err)
 	}
 
-	// Convert config.Container to common.Container
-	commonConfig := &common.Container{
-		Image: container.Config.Image,
-	}
-
 	// Create template
 	template := &Template{
 		Name:        templateName,
 		Description: description,
-		Config:      commonConfig,
+		Config:      container.Config,
 		CreatedAt:   time.Now(),
 	}
 
@@ -130,7 +125,7 @@ func (m *LXCManager) saveTemplate(template *Template) error {
 	return nil
 }
 
-func (m *LXCManager) CreateFromTemplate(templateName string, containerName string, overrides *common.Container) error {
+func (m *LXCManager) CreateFromTemplate(templateName string, containerName string, overrides *config.Container) error {
 	// Get the template configuration
 	template, err := m.GetTemplate(templateName)
 	if err != nil {
@@ -145,11 +140,8 @@ func (m *LXCManager) CreateFromTemplate(templateName string, containerName strin
 		if overrides.Image != "" {
 			config.Image = overrides.Image
 		}
-		if overrides.CPU != nil {
-			config.CPU = overrides.CPU
-		}
-		if overrides.Memory != nil {
-			config.Memory = overrides.Memory
+		if overrides.Resources != nil {
+			config.Resources = overrides.Resources
 		}
 		if overrides.Storage != nil {
 			config.Storage = overrides.Storage

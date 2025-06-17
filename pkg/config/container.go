@@ -2,12 +2,11 @@ package config
 
 import (
 	"fmt"
-	"github.com/larkinwc/proxmox-lxc-compose/pkg/common"
 	"strconv"
 	"strings"
 )
 
-func ValidateContainer(container *common.Container) error {
+func ValidateContainer(container *Container) error {
 	// Validate storage configuration
 	if container.Storage != nil {
 		bytes, err := ValidateStorageSize(container.Storage.Root)
@@ -75,7 +74,7 @@ func FormatBytes(bytes int64) string {
 	return fmt.Sprintf("%d", bytes)
 }
 
-func ValidateDevice(device *common.DeviceConfig) error {
+func ValidateDevice(device *DeviceConfig) error {
 	if device.Name == "" {
 		return fmt.Errorf("device name is required")
 	}
@@ -88,7 +87,7 @@ func ValidateDevice(device *common.DeviceConfig) error {
 	return nil
 }
 
-func validateSecurityConfig(config *common.SecurityConfig) error {
+func validateSecurityConfig(config *SecurityConfig) error {
 	if config == nil {
 		return nil
 	}
@@ -131,10 +130,10 @@ func (c *Container) migrateToResourceConfig() {
 }
 
 // ToCommonContainer converts the configuration to a common.Container
-func (c *Container) ToCommonContainer() *common.Container {
+func (c *Container) ToCommonContainer() *Container {
 	c.migrateToResourceConfig()
 
-	return &common.Container{
+	return &Container{
 		Image:      c.Image,
 		Storage:    c.Storage.ToCommonStorageConfig(),
 		Network:    c.Network.ToCommonNetworkConfig(),
@@ -142,43 +141,42 @@ func (c *Container) ToCommonContainer() *common.Container {
 		Command:    c.Command,
 		Entrypoint: c.Entrypoint,
 		Devices:    ToCommonDeviceConfigs(c.Devices),
-		CPU: &common.CPUConfig{
-			Cores:  &c.Resources.Cores,
-			Shares: &c.Resources.CPUShares,
-			Quota:  &c.Resources.CPUQuota,
-			Period: &c.Resources.CPUPeriod,
-		},
-		Memory: &common.MemoryConfig{
-			Limit: c.Resources.Memory,
-			Swap:  c.Resources.MemorySwap,
+		Resources: &ResourceConfig{
+			Cores:        c.Resources.Cores,
+			CPUShares:    c.Resources.CPUShares,
+			CPUQuota:     c.Resources.CPUQuota,
+			CPUPeriod:    c.Resources.CPUPeriod,
+			Memory:       c.Resources.Memory,
+			MemorySwap:   c.Resources.MemorySwap,
+			KernelMemory: c.Resources.KernelMemory,
 		},
 	}
 }
 
-// FromCommonContainer converts a common.Container to config.Container
-func FromCommonContainer(c *common.Container) *Container {
+// FromCommonContainer converts a config.Container to a config.Container
+func FromCommonContainer(c *Container) *Container {
 	if c == nil {
 		return nil
 	}
 	return &Container{
 		Image:       c.Image,
-		Network:     FromCommonNetworkConfig(c.Network),
-		Storage:     FromCommonStorageConfig(c.Storage),
-		Security:    FromCommonSecurityConfig(c.Security),
-		Resources:   FromCommonResources(c.CPU, c.Memory),
-		Devices:     FromCommonDeviceConfigs(c.Devices),
+		Resources:   fromCommonResources(c.Resources),
+		Storage:     fromCommonStorage(c.Storage),
+		Network:     fromCommonNetwork(c.Network),
+		Environment: c.Environment,
 		Command:     c.Command,
 		Entrypoint:  c.Entrypoint,
-		Environment: c.Environment,
+		Devices:     fromCommonDevices(c.Devices),
+		Security:    fromCommonSecurity(c.Security),
 	}
 }
 
 // ToCommonNetworkConfig converts config.NetworkConfig to common.NetworkConfig
-func (c *NetworkConfig) ToCommonNetworkConfig() *common.NetworkConfig {
+func (c *NetworkConfig) ToCommonNetworkConfig() *NetworkConfig {
 	if c == nil {
 		return nil
 	}
-	nc := &common.NetworkConfig{
+	nc := &NetworkConfig{
 		Type:         c.Type,
 		Bridge:       c.Bridge,
 		Interface:    c.Interface,
@@ -189,12 +187,12 @@ func (c *NetworkConfig) ToCommonNetworkConfig() *common.NetworkConfig {
 		Hostname:     c.Hostname,
 		MTU:          c.MTU,
 		MAC:          c.MAC,
-		Interfaces:   make([]common.NetworkInterface, len(c.Interfaces)),
-		PortForwards: make([]common.PortForward, len(c.PortForwards)),
+		Interfaces:   make([]NetworkInterface, len(c.Interfaces)),
+		PortForwards: make([]PortForward, len(c.PortForwards)),
 	}
 
 	for i, iface := range c.Interfaces {
-		nc.Interfaces[i] = common.NetworkInterface{
+		nc.Interfaces[i] = NetworkInterface{
 			Type:      iface.Type,
 			Bridge:    iface.Bridge,
 			Interface: iface.Interface,
@@ -209,7 +207,7 @@ func (c *NetworkConfig) ToCommonNetworkConfig() *common.NetworkConfig {
 	}
 
 	for i, pf := range c.PortForwards {
-		nc.PortForwards[i] = common.PortForward{
+		nc.PortForwards[i] = PortForward{
 			Protocol: pf.Protocol,
 			Host:     pf.Host,
 			Guest:    pf.Guest,
@@ -220,7 +218,7 @@ func (c *NetworkConfig) ToCommonNetworkConfig() *common.NetworkConfig {
 }
 
 // FromCommonNetworkConfig converts common.NetworkConfig to config.NetworkConfig
-func FromCommonNetworkConfig(c *common.NetworkConfig) *NetworkConfig {
+func FromCommonNetworkConfig(c *NetworkConfig) *NetworkConfig {
 	if c == nil {
 		return nil
 	}
@@ -266,11 +264,11 @@ func FromCommonNetworkConfig(c *common.NetworkConfig) *NetworkConfig {
 }
 
 // ToCommonStorageConfig converts config.StorageConfig to common.StorageConfig
-func (c *StorageConfig) ToCommonStorageConfig() *common.StorageConfig {
+func (c *StorageConfig) ToCommonStorageConfig() *StorageConfig {
 	if c == nil {
 		return nil
 	}
-	return &common.StorageConfig{
+	return &StorageConfig{
 		Root:      c.Root,
 		Backend:   c.Backend,
 		Pool:      c.Pool,
@@ -279,7 +277,7 @@ func (c *StorageConfig) ToCommonStorageConfig() *common.StorageConfig {
 }
 
 // FromCommonStorageConfig converts common.StorageConfig to config.StorageConfig
-func FromCommonStorageConfig(c *common.StorageConfig) *StorageConfig {
+func FromCommonStorageConfig(c *StorageConfig) *StorageConfig {
 	if c == nil {
 		return nil
 	}
@@ -292,11 +290,11 @@ func FromCommonStorageConfig(c *common.StorageConfig) *StorageConfig {
 }
 
 // ToCommonCPUConfig converts config.CPUConfig to common.CPUConfig
-func (c *CPUConfig) ToCommonCPUConfig() *common.CPUConfig {
+func (c *CPUConfig) ToCommonCPUConfig() *CPUConfig {
 	if c == nil {
 		return nil
 	}
-	return &common.CPUConfig{
+	return &CPUConfig{
 		Cores:  c.Cores,
 		Shares: c.Shares,
 		Quota:  c.Quota,
@@ -305,7 +303,7 @@ func (c *CPUConfig) ToCommonCPUConfig() *common.CPUConfig {
 }
 
 // FromCommonResources converts common.CPUCOnfig and common.MemoryConfig to config.ResourceConfig
-func FromCommonResources(c *common.CPUConfig, m *common.MemoryConfig) *ResourceConfig {
+func FromCommonResources(c *CPUConfig, m *MemoryConfig) *ResourceConfig {
 	if c == nil && m == nil {
 		return nil
 	}
@@ -336,7 +334,7 @@ func FromCommonResources(c *common.CPUConfig, m *common.MemoryConfig) *ResourceC
 }
 
 // FromCommonCPUConfig converts common.CPUConfig to config.CPUConfig
-func FromCommonCPUConfig(c *common.CPUConfig) *CPUConfig {
+func FromCommonCPUConfig(c *CPUConfig) *CPUConfig {
 	if c == nil {
 		return nil
 	}
@@ -349,18 +347,18 @@ func FromCommonCPUConfig(c *common.CPUConfig) *CPUConfig {
 }
 
 // ToCommonMemoryConfig converts config.MemoryConfig to common.MemoryConfig
-func (c *MemoryConfig) ToCommonMemoryConfig() *common.MemoryConfig {
+func (c *MemoryConfig) ToCommonMemoryConfig() *MemoryConfig {
 	if c == nil {
 		return nil
 	}
-	return &common.MemoryConfig{
+	return &MemoryConfig{
 		Limit: c.Limit,
 		Swap:  c.Swap,
 	}
 }
 
 // FromCommonMemoryConfig converts common.MemoryConfig to config.MemoryConfig
-func FromCommonMemoryConfig(c *common.MemoryConfig) *MemoryConfig {
+func FromCommonMemoryConfig(c *MemoryConfig) *MemoryConfig {
 	if c == nil {
 		return nil
 	}
@@ -371,13 +369,13 @@ func FromCommonMemoryConfig(c *common.MemoryConfig) *MemoryConfig {
 }
 
 // ToCommonDeviceConfigs converts []DeviceConfig to []common.DeviceConfig
-func ToCommonDeviceConfigs(devices []DeviceConfig) []common.DeviceConfig {
+func ToCommonDeviceConfigs(devices []DeviceConfig) []DeviceConfig {
 	if devices == nil {
 		return nil
 	}
-	commonDevices := make([]common.DeviceConfig, len(devices))
+	commonDevices := make([]DeviceConfig, len(devices))
 	for i, d := range devices {
-		commonDevices[i] = common.DeviceConfig{
+		commonDevices[i] = DeviceConfig{
 			Name:        d.Name,
 			Type:        d.Type,
 			Source:      d.Source,
@@ -389,7 +387,7 @@ func ToCommonDeviceConfigs(devices []DeviceConfig) []common.DeviceConfig {
 }
 
 // FromCommonDeviceConfigs converts []common.DeviceConfig to []DeviceConfig
-func FromCommonDeviceConfigs(devices []common.DeviceConfig) []DeviceConfig {
+func FromCommonDeviceConfigs(devices []DeviceConfig) []DeviceConfig {
 	if devices == nil {
 		return nil
 	}
@@ -406,21 +404,7 @@ func FromCommonDeviceConfigs(devices []common.DeviceConfig) []DeviceConfig {
 	return configDevices
 }
 
-func (c *SecurityConfig) ToCommonSecurityConfig() *common.SecurityConfig {
-	if c == nil {
-		return nil
-	}
-	return &common.SecurityConfig{
-		Isolation:       c.Isolation,
-		Privileged:      c.Privileged,
-		AppArmorProfile: c.AppArmorProfile,
-		SeccompProfile:  c.SeccompProfile,
-		SELinuxContext:  c.SELinuxContext,
-		Capabilities:    c.Capabilities,
-	}
-}
-
-func FromCommonSecurityConfig(c *common.SecurityConfig) *SecurityConfig {
+func (c *SecurityConfig) ToCommonSecurityConfig() *SecurityConfig {
 	if c == nil {
 		return nil
 	}
@@ -431,5 +415,221 @@ func FromCommonSecurityConfig(c *common.SecurityConfig) *SecurityConfig {
 		SeccompProfile:  c.SeccompProfile,
 		SELinuxContext:  c.SELinuxContext,
 		Capabilities:    c.Capabilities,
+	}
+}
+
+func FromCommonSecurityConfig(c *SecurityConfig) *SecurityConfig {
+	if c == nil {
+		return nil
+	}
+	return &SecurityConfig{
+		Isolation:       c.Isolation,
+		Privileged:      c.Privileged,
+		AppArmorProfile: c.AppArmorProfile,
+		SeccompProfile:  c.SeccompProfile,
+		SELinuxContext:  c.SELinuxContext,
+		Capabilities:    c.Capabilities,
+	}
+}
+
+func fromCommonResources(r *ResourceConfig) *ResourceConfig {
+	if r == nil {
+		return nil
+	}
+	return &ResourceConfig{
+		CPUShares:  r.CPUShares,
+		CPUQuota:   r.CPUQuota,
+		CPUPeriod:  r.CPUPeriod,
+		Memory:     r.Memory,
+		MemorySwap: r.MemorySwap,
+	}
+}
+
+func fromCommonStorage(s *StorageConfig) *StorageConfig {
+	if s == nil {
+		return nil
+	}
+	return &StorageConfig{
+		Root:      s.Root,
+		Backend:   s.Backend,
+		Pool:      s.Pool,
+		AutoMount: s.AutoMount,
+	}
+}
+
+func fromCommonNetwork(n *NetworkConfig) *NetworkConfig {
+	if n == nil {
+		return nil
+	}
+	nc := &NetworkConfig{
+		Type:         n.Type,
+		Bridge:       n.Bridge,
+		Interface:    n.Interface,
+		IP:           n.IP,
+		Gateway:      n.Gateway,
+		DNS:          n.DNS,
+		DHCP:         n.DHCP,
+		Hostname:     n.Hostname,
+		MTU:          n.MTU,
+		MAC:          n.MAC,
+		Interfaces:   make([]NetworkInterface, len(n.Interfaces)),
+		PortForwards: make([]PortForward, len(n.PortForwards)),
+	}
+
+	for i, iface := range n.Interfaces {
+		nc.Interfaces[i] = NetworkInterface{
+			Type:      iface.Type,
+			Bridge:    iface.Bridge,
+			Interface: iface.Interface,
+			IP:        iface.IP,
+			Gateway:   iface.Gateway,
+			DNS:       iface.DNS,
+			DHCP:      iface.DHCP,
+			Hostname:  iface.Hostname,
+			MTU:       iface.MTU,
+			MAC:       iface.MAC,
+		}
+	}
+
+	for i, pf := range n.PortForwards {
+		nc.PortForwards[i] = PortForward{
+			Protocol: pf.Protocol,
+			Host:     pf.Host,
+			Guest:    pf.Guest,
+		}
+	}
+
+	return nc
+}
+
+func fromCommonDevices(d []DeviceConfig) []DeviceConfig {
+	if d == nil {
+		return nil
+	}
+	configDevices := make([]DeviceConfig, len(d))
+	for i, device := range d {
+		configDevices[i] = DeviceConfig{
+			Name:        device.Name,
+			Type:        device.Type,
+			Source:      device.Source,
+			Destination: device.Destination,
+			Options:     device.Options,
+		}
+	}
+	return configDevices
+}
+
+func fromCommonSecurity(s *SecurityConfig) *SecurityConfig {
+	if s == nil {
+		return nil
+	}
+	return &SecurityConfig{
+		Isolation:       s.Isolation,
+		Privileged:      s.Privileged,
+		AppArmorProfile: s.AppArmorProfile,
+		SeccompProfile:  s.SeccompProfile,
+		SELinuxContext:  s.SELinuxContext,
+		Capabilities:    s.Capabilities,
+	}
+}
+
+func toCommonResources(r *ResourceConfig) *ResourceConfig {
+	if r == nil {
+		return nil
+	}
+	return &ResourceConfig{
+		CPUShares:  r.CPUShares,
+		CPUQuota:   r.CPUQuota,
+		CPUPeriod:  r.CPUPeriod,
+		Memory:     r.Memory,
+		MemorySwap: r.MemorySwap,
+	}
+}
+
+func toCommonStorage(s *StorageConfig) *StorageConfig {
+	if s == nil {
+		return nil
+	}
+	return &StorageConfig{
+		Root:      s.Root,
+		Backend:   s.Backend,
+		Pool:      s.Pool,
+		AutoMount: s.AutoMount,
+	}
+}
+
+func toCommonNetwork(n *NetworkConfig) *NetworkConfig {
+	if n == nil {
+		return nil
+	}
+	nc := &NetworkConfig{
+		Type:         n.Type,
+		Bridge:       n.Bridge,
+		Interface:    n.Interface,
+		IP:           n.IP,
+		Gateway:      n.Gateway,
+		DNS:          n.DNS,
+		DHCP:         n.DHCP,
+		Hostname:     n.Hostname,
+		MTU:          n.MTU,
+		MAC:          n.MAC,
+		Interfaces:   make([]NetworkInterface, len(n.Interfaces)),
+		PortForwards: make([]PortForward, len(n.PortForwards)),
+	}
+
+	for i, iface := range n.Interfaces {
+		nc.Interfaces[i] = NetworkInterface{
+			Type:      iface.Type,
+			Bridge:    iface.Bridge,
+			Interface: iface.Interface,
+			IP:        iface.IP,
+			Gateway:   iface.Gateway,
+			DNS:       iface.DNS,
+			DHCP:      iface.DHCP,
+			Hostname:  iface.Hostname,
+			MTU:       iface.MTU,
+			MAC:       iface.MAC,
+		}
+	}
+
+	for i, pf := range n.PortForwards {
+		nc.PortForwards[i] = PortForward{
+			Protocol: pf.Protocol,
+			Host:     pf.Host,
+			Guest:    pf.Guest,
+		}
+	}
+
+	return nc
+}
+
+func toCommonDevices(d []DeviceConfig) []DeviceConfig {
+	if d == nil {
+		return nil
+	}
+	configDevices := make([]DeviceConfig, len(d))
+	for i, device := range d {
+		configDevices[i] = DeviceConfig{
+			Name:        device.Name,
+			Type:        device.Type,
+			Source:      device.Source,
+			Destination: device.Destination,
+			Options:     device.Options,
+		}
+	}
+	return configDevices
+}
+
+func toCommonSecurity(s *SecurityConfig) *SecurityConfig {
+	if s == nil {
+		return nil
+	}
+	return &SecurityConfig{
+		Isolation:       s.Isolation,
+		Privileged:      s.Privileged,
+		AppArmorProfile: s.AppArmorProfile,
+		SeccompProfile:  s.SeccompProfile,
+		SELinuxContext:  s.SELinuxContext,
+		Capabilities:    s.Capabilities,
 	}
 }

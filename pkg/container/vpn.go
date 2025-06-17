@@ -6,7 +6,7 @@ import (
 	"path/filepath"
 	"text/template"
 
-	"github.com/larkinwc/proxmox-lxc-compose/pkg/common"
+	"github.com/larkinwc/proxmox-lxc-compose/pkg/config"
 	"github.com/larkinwc/proxmox-lxc-compose/pkg/logging"
 )
 
@@ -53,7 +53,7 @@ auth-user-pass
 `
 
 // ConfigureVPN sets up VPN for a container
-func (m *LXCManager) ConfigureVPN(name string, vpn *common.VPNConfig) error {
+func (m *LXCManager) ConfigureVPN(name string, vpn *config.VPNConfig) error {
 	if vpn == nil {
 		return nil
 	}

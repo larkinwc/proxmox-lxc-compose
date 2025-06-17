@@ -5,7 +5,11 @@ import (
 	"path/filepath"
 	"reflect"
 	"testing"
+
 	"gopkg.in/yaml.v3"
+
+	"github.com/larkinwc/proxmox-lxc-compose/pkg/config"
+	"github.com/larkinwc/proxmox-lxc-compose/pkg/validation"
 )
 
 func TestLoad_ValidConfig(t *testing.T) {
@@ -57,21 +61,21 @@ services:
 	}
 
 	// Test loading the config
-	config, err := Load(configFile)
+	cfg, err := config.Load(configFile)
 	if err != nil {
 		t.Fatalf("Load() failed: %v", err)
 	}
 
-	if config == nil {
+	if cfg == nil {
 		t.Fatal("Load() returned nil config")
 	}
 
 	// Verify the loaded configuration
-	if len(config.Services) != 1 {
-		t.Errorf("Expected 1 service, got %d", len(config.Services))
+	if len(cfg.Services) != 1 {
+		t.Errorf("Expected 1 service, got %d", len(cfg.Services))
 	}
 
-	web, exists := config.Services["web"]
+	web, exists := cfg.Services["web"]
 	if !exists {
 		t.Fatal("Expected 'web' service not found")
 	}
@@ -98,7 +102,7 @@ services:
 }
 
 func TestLoad_FileNotFound(t *testing.T) {
-	_, err := Load("nonexistent-file.yml")
+	_, err := config.Load("nonexistent-file.yml")
 	if err == nil {
 		t.Error("Load() should return error for nonexistent file")
 	}
@@ -126,7 +130,7 @@ services:
 		t.Fatalf("Failed to write test config file: %v", err)
 	}
 
-	_, err = Load(configFile)
+	_, err = config.Load(configFile)
 	if err == nil {
 		t.Error("Load() should return error for invalid YAML")
 	}
@@ -147,7 +151,7 @@ func TestLoad_EmptyFile(t *testing.T) {
 		t.Fatalf("Failed to write test config file: %v", err)
 	}
 
-	config, err := Load(configFile)
+	config, err := config.Load(configFile)
 	if err != nil {
 		t.Fatalf("Load() failed for empty file: %v", err)
 	}
@@ -164,7 +168,7 @@ func TestLoad_EmptyFile(t *testing.T) {
 }
 
 func TestValidateNetworkConfig_NilConfig(t *testing.T) {
-	err := ValidateNetworkConfig(nil)
+	err := validation.ValidateNetworkConfig(nil)
 	if err != nil {
 		t.Errorf("ValidateNetworkConfig(nil) should return nil, got: %v", err)
 	}
@@ -173,28 +177,28 @@ func TestValidateNetworkConfig_NilConfig(t *testing.T) {
 func TestValidateNetworkConfig_ValidConfigs(t *testing.T) {
 	tests := []struct {
 		name   string
-		config *NetworkConfig
+		config *config.NetworkConfig
 	}{
 		{
-			name: "empty config",
-			config: &NetworkConfig{},
+			name:   "empty config",
+			config: &config.NetworkConfig{},
 		},
 		{
 			name: "bridge type",
-			config: &NetworkConfig{
+			config: &config.NetworkConfig{
 				Type: "bridge",
 			},
 		},
 		{
 			name: "veth type",
-			config: &NetworkConfig{
+			config: &config.NetworkConfig{
 				Type: "veth",
 			},
 		},
 		{
 			name: "bridge interface with bridge name",
-			config: &NetworkConfig{
-				Interfaces: []NetworkInterface{
+			config: &config.NetworkConfig{
+				Interfaces: []config.NetworkInterface{
 					{
 						Type:   "bridge",
 						Bridge: "lxcbr0",
@@ -203,19 +207,31 @@ func TestValidateNetworkConfig_ValidConfigs(t *testing.T) {
 			},
 		},
 		{
-			name: "veth interface",
-			config: &NetworkConfig{
-				Interfaces: []NetworkInterface{
+			name: "veth interface with name",
+			config: &config.NetworkConfig{
+				Interfaces: []config.NetworkInterface{
 					{
-						Type: "veth",
+						Type:      "veth",
+						Interface: "veth0",
+					},
+				},
+			},
+		},
+		{
+			name: "macvlan interface with IP",
+			config: &config.NetworkConfig{
+				Interfaces: []config.NetworkInterface{
+					{
+						Type: "macvlan",
+						IP:   "192.168.1.100/24",
 					},
 				},
 			},
 		},
 		{
 			name: "interface with valid IP",
-			config: &NetworkConfig{
-				Interfaces: []NetworkInterface{
+			config: &config.NetworkConfig{
+				Interfaces: []config.NetworkInterface{
 					{
 						Type: "veth",
 						IP:   "192.168.1.100/24",
@@ -225,8 +241,8 @@ func TestValidateNetworkConfig_ValidConfigs(t *testing.T) {
 		},
 		{
 			name: "interface with valid gateway",
-			config: &NetworkConfig{
-				Interfaces: []NetworkInterface{
+			config: &config.NetworkConfig{
+				Interfaces: []config.NetworkInterface{
 					{
 						Type:    "veth",
 						Gateway: "192.168.1.1",
@@ -236,8 +252,8 @@ func TestValidateNetworkConfig_ValidConfigs(t *testing.T) {
 		},
 		{
 			name: "interface with valid MTU",
-			config: &NetworkConfig{
-				Interfaces: []NetworkInterface{
+			config: &config.NetworkConfig{
+				Interfaces: []config.NetworkInterface{
 					{
 						Type: "veth",
 						MTU:  1500,
@@ -247,8 +263,8 @@ func TestValidateNetworkConfig_ValidConfigs(t *testing.T) {
 		},
 		{
 			name: "interface with valid MAC",
-			config: &NetworkConfig{
-				Interfaces: []NetworkInterface{
+			config: &config.NetworkConfig{
+				Interfaces: []config.NetworkInterface{
 					{
 						Type: "veth",
 						MAC:  "aa:bb:cc:dd:ee:ff",
@@ -258,8 +274,8 @@ func TestValidateNetworkConfig_ValidConfigs(t *testing.T) {
 		},
 		{
 			name: "valid port forwards",
-			config: &NetworkConfig{
-				PortForwards: []PortForward{
+			config: &config.NetworkConfig{
+				PortForwards: []config.PortForward{
 					{
 						Protocol: "tcp",
 						Host:     8080,
@@ -277,7 +293,7 @@ func TestValidateNetworkConfig_ValidConfigs(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			err := ValidateNetworkConfig(tt.config)
+			err := validation.ValidateNetworkConfig(tt.config)
 			if err != nil {
 				t.Errorf("ValidateNetworkConfig() failed for valid config: %v", err)
 			}
@@ -288,20 +304,20 @@ func TestValidateNetworkConfig_ValidConfigs(t *testing.T) {
 func TestValidateNetworkConfig_InvalidConfigs(t *testing.T) {
 	tests := []struct {
 		name          string
-		config        *NetworkConfig
+		config        *config.NetworkConfig
 		expectedError string
 	}{
 		{
 			name: "invalid network type",
-			config: &NetworkConfig{
+			config: &config.NetworkConfig{
 				Type: "invalid",
 			},
 			expectedError: "invalid network type: invalid",
 		},
 		{
 			name: "invalid interface type",
-			config: &NetworkConfig{
-				Interfaces: []NetworkInterface{
+			config: &config.NetworkConfig{
+				Interfaces: []config.NetworkInterface{
 					{
 						Type: "invalid",
 					},
@@ -311,8 +327,8 @@ func TestValidateNetworkConfig_InvalidConfigs(t *testing.T) {
 		},
 		{
 			name: "bridge interface without bridge name",
-			config: &NetworkConfig{
-				Interfaces: []NetworkInterface{
+			config: &config.NetworkConfig{
+				Interfaces: []config.NetworkInterface{
 					{
 						Type: "bridge",
 					},
@@ -322,8 +338,8 @@ func TestValidateNetworkConfig_InvalidConfigs(t *testing.T) {
 		},
 		{
 			name: "interface with invalid IP",
-			config: &NetworkConfig{
-				Interfaces: []NetworkInterface{
+			config: &config.NetworkConfig{
+				Interfaces: []config.NetworkInterface{
 					{
 						Type: "veth",
 						IP:   "invalid-ip",
@@ -334,8 +350,8 @@ func TestValidateNetworkConfig_InvalidConfigs(t *testing.T) {
 		},
 		{
 			name: "interface with invalid gateway",
-			config: &NetworkConfig{
-				Interfaces: []NetworkInterface{
+			config: &config.NetworkConfig{
+				Interfaces: []config.NetworkInterface{
 					{
 						Type:    "veth",
 						Gateway: "invalid-gateway",
@@ -346,8 +362,8 @@ func TestValidateNetworkConfig_InvalidConfigs(t *testing.T) {
 		},
 		{
 			name: "interface with MTU too low",
-			config: &NetworkConfig{
-				Interfaces: []NetworkInterface{
+			config: &config.NetworkConfig{
+				Interfaces: []config.NetworkInterface{
 					{
 						Type: "veth",
 						MTU:  67,
@@ -358,8 +374,8 @@ func TestValidateNetworkConfig_InvalidConfigs(t *testing.T) {
 		},
 		{
 			name: "interface with MTU too high",
-			config: &NetworkConfig{
-				Interfaces: []NetworkInterface{
+			config: &config.NetworkConfig{
+				Interfaces: []config.NetworkInterface{
 					{
 						Type: "veth",
 						MTU:  65536,
@@ -370,8 +386,8 @@ func TestValidateNetworkConfig_InvalidConfigs(t *testing.T) {
 		},
 		{
 			name: "interface with invalid MAC",
-			config: &NetworkConfig{
-				Interfaces: []NetworkInterface{
+			config: &config.NetworkConfig{
+				Interfaces: []config.NetworkInterface{
 					{
 						Type: "veth",
 						MAC:  "invalid-mac",
@@ -382,8 +398,8 @@ func TestValidateNetworkConfig_InvalidConfigs(t *testing.T) {
 		},
 		{
 			name: "port forward with invalid protocol",
-			config: &NetworkConfig{
-				PortForwards: []PortForward{
+			config: &config.NetworkConfig{
+				PortForwards: []config.PortForward{
 					{
 						Protocol: "invalid",
 						Host:     8080,
@@ -395,8 +411,8 @@ func TestValidateNetworkConfig_InvalidConfigs(t *testing.T) {
 		},
 		{
 			name: "port forward with invalid host port (too low)",
-			config: &NetworkConfig{
-				PortForwards: []PortForward{
+			config: &config.NetworkConfig{
+				PortForwards: []config.PortForward{
 					{
 						Protocol: "tcp",
 						Host:     0,
@@ -408,8 +424,8 @@ func TestValidateNetworkConfig_InvalidConfigs(t *testing.T) {
 		},
 		{
 			name: "port forward with invalid host port (too high)",
-			config: &NetworkConfig{
-				PortForwards: []PortForward{
+			config: &config.NetworkConfig{
+				PortForwards: []config.PortForward{
 					{
 						Protocol: "tcp",
 						Host:     65536,
@@ -421,8 +437,8 @@ func TestValidateNetworkConfig_InvalidConfigs(t *testing.T) {
 		},
 		{
 			name: "port forward with invalid guest port (too low)",
-			config: &NetworkConfig{
-				PortForwards: []PortForward{
+			config: &config.NetworkConfig{
+				PortForwards: []config.PortForward{
 					{
 						Protocol: "tcp",
 						Host:     8080,
@@ -434,8 +450,8 @@ func TestValidateNetworkConfig_InvalidConfigs(t *testing.T) {
 		},
 		{
 			name: "port forward with invalid guest port (too high)",
-			config: &NetworkConfig{
-				PortForwards: []PortForward{
+			config: &config.NetworkConfig{
+				PortForwards: []config.PortForward{
 					{
 						Protocol: "tcp",
 						Host:     8080,
@@ -449,7 +465,7 @@ func TestValidateNetworkConfig_InvalidConfigs(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			err := ValidateNetworkConfig(tt.config)
+			err := validation.ValidateNetworkConfig(tt.config)
 			if err == nil {
 				t.Error("ValidateNetworkConfig() should return error for invalid config")
 			}
@@ -487,7 +503,7 @@ func TestValidateIPAddress(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			err := validateIPAddress(tt.ip)
+			err := validation.ValidateIPAddress(tt.ip)
 			if tt.wantErr {
 				if err == nil {
 					t.Errorf("validateIPAddress(%s) should return error", tt.ip)
@@ -525,7 +541,7 @@ func TestValidateMACAddress(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			err := validateMACAddress(tt.mac)
+			err := validation.ValidateMACAddress(tt.mac)
 			if tt.wantErr {
 				if err == nil {
 					t.Errorf("validateMACAddress(%s) should return error", tt.mac)
@@ -547,32 +563,24 @@ func TestYAMLMarshaling(t *testing.T) {
 	}{
 		{
 			name: "VPNConfig",
-			data: &VPNConfig{
+			data: &config.VPNConfig{
 				Remote:   "vpn.example.com",
 				Port:     1194,
 				Protocol: "udp",
-				Config:   "/etc/openvpn/client.conf",
-				Auth: map[string]string{
-					"username": "user",
-					"password": "pass",
-				},
-				CA:   "ca-cert-content",
-				Cert: "client-cert-content",
-				Key:  "client-key-content",
 			},
 		},
 		{
 			name: "BandwidthLimit",
-			data: &BandwidthLimit{
-				IngressRate:  "1mbit",
-				IngressBurst: "2mbit",
-				EgressRate:   "500kbit",
-				EgressBurst:  "1mbit",
+			data: &config.BandwidthLimit{
+				IngressRate:  "100Mbps",
+				IngressBurst: "200MB",
+				EgressRate:   "50Mbps",
+				EgressBurst:  "100MB",
 			},
 		},
 		{
 			name: "NetworkInterface",
-			data: &NetworkInterface{
+			data: &config.NetworkInterface{
 				Type:      "bridge",
 				Bridge:    "lxcbr0",
 				Interface: "eth0",
@@ -583,7 +591,7 @@ func TestYAMLMarshaling(t *testing.T) {
 				Hostname:  "container",
 				MTU:       1500,
 				MAC:       "aa:bb:cc:dd:ee:ff",
-				Bandwidth: &BandwidthLimit{
+				Bandwidth: &config.BandwidthLimit{
 					IngressRate: "1mbit",
 					EgressRate:  "500kbit",
 				},
@@ -591,7 +599,7 @@ func TestYAMLMarshaling(t *testing.T) {
 		},
 		{
 			name: "PortForward",
-			data: &PortForward{
+			data: &config.PortForward{
 				Protocol: "tcp",
 				Host:     8080,
 				Guest:    80,
@@ -599,23 +607,24 @@ func TestYAMLMarshaling(t *testing.T) {
 		},
 		{
 			name: "CPUConfig",
-			data: &CPUConfig{
-				Shares: int64Ptr(1024),
-				Quota:  int64Ptr(50000),
-				Period: int64Ptr(100000),
+			data: &config.CPUConfig{
 				Cores:  intPtr(2),
+				Shares: int64Ptr(1024),
+				Quota:  int64Ptr(100000),
+				Period: int64Ptr(100000),
 			},
 		},
 		{
 			name: "MemoryConfig",
-			data: &MemoryConfig{
-				Limit: "1G",
-				Swap:  "2G",
+			data: &config.MemoryConfig{
+				Limit:   "1G",
+				Swap:    "2G",
+				Reserve: "512M",
 			},
 		},
 		{
 			name: "Mount",
-			data: &Mount{
+			data: &config.Mount{
 				Source:  "/host/path",
 				Target:  "/container/path",
 				Type:    "bind",
@@ -624,63 +633,50 @@ func TestYAMLMarshaling(t *testing.T) {
 		},
 		{
 			name: "StorageConfig",
-			data: &StorageConfig{
+			data: &config.StorageConfig{
 				Root:      "10G",
 				Backend:   "dir",
 				Pool:      "default",
 				AutoMount: true,
-				Mounts: []Mount{
-					{
-						Source: "/host/data",
-						Target: "/container/data",
-						Type:   "bind",
-					},
-				},
 			},
 		},
 		{
 			name: "SecurityConfig",
-			data: &SecurityConfig{
-				Isolation:       "strict",
-				Privileged:      false,
-				AppArmorProfile: "lxc-container-default",
-				SeccompProfile:  "default",
-				SELinuxContext:  "system_u:system_r:container_t:s0",
-				Capabilities:    []string{"NET_ADMIN", "SYS_TIME"},
+			data: &config.SecurityConfig{
+				Isolation:       "default",
+				Privileged:      true,
+				AppArmorProfile: "unconfined",
 			},
 		},
 		{
 			name: "DeviceConfig",
-			data: &DeviceConfig{
-				Name:        "dev1",
+			data: &config.DeviceConfig{
+				Name:        "test-device",
 				Type:        "disk",
-				Source:      "/dev/sdb1",
-				Destination: "/container/dev/sdb1",
-				Options:     []string{"rw", "create=file"},
+				Source:      "/host/device",
+				Destination: "/container/device",
 			},
 		},
 		{
 			name: "Container",
-			data: &Container{
+			data: &config.Container{
 				Image: "nginx:alpine",
-				Network: &NetworkConfig{
+				Network: &config.NetworkConfig{
 					Type:   "bridge",
 					Bridge: "lxcbr0",
 				},
-				Storage: &StorageConfig{
+				Storage: &config.StorageConfig{
 					Root:    "10G",
 					Backend: "dir",
 				},
-				Security: &SecurityConfig{
-					Isolation: "default",
+				Security: &config.SecurityConfig{
+					Privileged: false,
 				},
-				CPU: &CPUConfig{
-					Cores: intPtr(2),
+				Resources: &config.ResourceConfig{
+					Cores:  2,
+					Memory: "1G",
 				},
-				Memory: &MemoryConfig{
-					Limit: "1G",
-				},
-				Ports: []PortForward{
+				Ports: []config.PortForward{
 					{Protocol: "tcp", Host: 8080, Guest: 80},
 				},
 				Volumes: []string{"/host:/container"},
@@ -692,7 +688,7 @@ func TestYAMLMarshaling(t *testing.T) {
 				Environment: map[string]string{
 					"ANOTHER_VAR": "another_value",
 				},
-				Devices: []DeviceConfig{
+				Devices: []config.DeviceConfig{
 					{Name: "dev1", Type: "disk", Source: "/dev/sdb1"},
 				},
 			},
@@ -703,7 +699,7 @@ func TestYAMLMarshaling(t *testing.T) {
 				Services: map[string]Container{
 					"web": {
 						Image: "nginx:alpine",
-						Network: &NetworkConfig{
+						Network: &config.NetworkConfig{
 							Type: "bridge",
 						},
 					},
@@ -714,6 +710,15 @@ func TestYAMLMarshaling(t *testing.T) {
 						},
 					},
 				},
+			},
+		},
+		{
+			name: "NetworkInterface with bandwidth limits",
+			data: &config.NetworkInterface{
+				Type:         "bridge",
+				Bridge:       "lxcbr0",
+				BandwidthIn:  int64(100000000), // 100 MB/s
+				BandwidthOut: int64(50000000),  // 50 MB/s
 			},
 		},
 	}
@@ -747,8 +752,8 @@ func TestYAMLMarshaling(t *testing.T) {
 
 func TestNetworkConfig_DefaultInterfaceType(t *testing.T) {
 	// Test that empty interface type defaults to "veth" during validation
-	config := &NetworkConfig{
-		Interfaces: []NetworkInterface{
+	config := &config.NetworkConfig{
+		Interfaces: []config.NetworkInterface{
 			{
 				// Type is empty, should default to "veth"
 				IP: "192.168.1.100/24",
@@ -756,7 +761,7 @@ func TestNetworkConfig_DefaultInterfaceType(t *testing.T) {
 		},
 	}
 
-	err := ValidateNetworkConfig(config)
+	err := validation.ValidateNetworkConfig(config)
 	if err != nil {
 		t.Errorf("ValidateNetworkConfig() should succeed with default interface type: %v", err)
 	}
@@ -769,10 +774,10 @@ func TestNetworkConfig_DefaultInterfaceType(t *testing.T) {
 
 func TestComplexNetworkConfig(t *testing.T) {
 	// Test a complex network configuration with multiple interfaces and port forwards
-	config := &NetworkConfig{
+	config := &config.NetworkConfig{
 		Type:   "bridge",
 		Bridge: "lxcbr0",
-		Interfaces: []NetworkInterface{
+		Interfaces: []config.NetworkInterface{
 			{
 				Type:    "bridge",
 				Bridge:  "lxcbr0",
@@ -781,7 +786,7 @@ func TestComplexNetworkConfig(t *testing.T) {
 				DNS:     []string{"8.8.8.8", "8.8.4.4"},
 				MTU:     1500,
 				MAC:     "aa:bb:cc:dd:ee:ff",
-				Bandwidth: &BandwidthLimit{
+				Bandwidth: &config.BandwidthLimit{
 					IngressRate:  "1mbit",
 					IngressBurst: "2mbit",
 					EgressRate:   "500kbit",
@@ -793,14 +798,14 @@ func TestComplexNetworkConfig(t *testing.T) {
 				IP:   "10.0.0.100/8",
 			},
 		},
-		PortForwards: []PortForward{
+		PortForwards: []config.PortForward{
 			{Protocol: "tcp", Host: 8080, Guest: 80},
 			{Protocol: "tcp", Host: 8443, Guest: 443},
 			{Protocol: "udp", Host: 53, Guest: 53},
 		},
 	}
 
-	err := ValidateNetworkConfig(config)
+	err := validation.ValidateNetworkConfig(config)
 	if err != nil {
 		t.Errorf("ValidateNetworkConfig() should succeed for complex valid config: %v", err)
 	}
@@ -808,9 +813,9 @@ func TestComplexNetworkConfig(t *testing.T) {
 
 // Helper functions
 func containsSubstring(s, substr string) bool {
-	return len(s) >= len(substr) && (s == substr || len(substr) == 0 || 
-		(len(s) > len(substr) && (s[:len(substr)] == substr || s[len(s)-len(substr):] == substr || 
-		containsAt(s, substr))))
+	return len(s) >= len(substr) && (s == substr || len(substr) == 0 ||
+		(len(s) > len(substr) && (s[:len(substr)] == substr || s[len(s)-len(substr):] == substr ||
+			containsAt(s, substr))))
 }
 
 func containsAt(s, substr string) bool {

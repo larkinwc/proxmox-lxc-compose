@@ -3,7 +3,7 @@ package main
 import (
 	"fmt"
 
-	"github.com/larkinwc/proxmox-lxc-compose/pkg/common"
+	"github.com/larkinwc/proxmox-lxc-compose/pkg/config"
 	"github.com/larkinwc/proxmox-lxc-compose/pkg/container"
 
 	"github.com/spf13/cobra"
@@ -31,7 +31,7 @@ func upCmdRunE(_ *cobra.Command, args []string) error {
 	}
 
 	// Load configuration
-	cfg, err := common.Load(configFile)
+	cfg, err := config.Load(configFile)
 	if err != nil {
 		return fmt.Errorf("failed to load config: %w", err)
 	}

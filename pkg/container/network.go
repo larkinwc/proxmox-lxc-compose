@@ -1,11 +1,9 @@
 package container
 
 import (
-	"bufio"
 	"fmt"
 	"os"
 	"path/filepath"
-	"strconv"
 	"strings"
 
 	"github.com/larkinwc/proxmox-lxc-compose/pkg/config"
@@ -145,117 +143,4 @@ func (m *LXCManager) configureNetwork(name string, cfg *config.NetworkConfig) er
 	}
 
 	return os.WriteFile(configPath, []byte(strings.Join(lines, "\n")+"\n"), 0644)
-}
-
-// GetNetworkConfig reads network configuration from a container's config file
-func (m *LXCManager) GetNetworkConfig(name string) (*config.NetworkConfig, error) {
-	logging.Debug("Reading network configuration", "container", name)
-
-	configPath := filepath.Join(m.configPath, name, "network", "config")
-	data, err := os.ReadFile(configPath)
-	if err != nil {
-		if os.IsNotExist(err) {
-			return nil, nil
-		}
-		return nil, fmt.Errorf("failed to read network config: %w", err)
-	}
-
-	cfg := &config.NetworkConfig{
-		Interfaces: make([]config.NetworkInterface, 0),
-	}
-	var currentIface *config.NetworkInterface
-	var currentIndex = -1
-
-	scanner := bufio.NewScanner(strings.NewReader(string(data)))
-	for scanner.Scan() {
-		line := strings.TrimSpace(scanner.Text())
-		if line == "" || strings.HasPrefix(line, "#") {
-			continue
-		}
-
-		parts := strings.SplitN(line, "=", 2)
-		if len(parts) != 2 {
-			continue
-		}
-
-		key := strings.TrimSpace(parts[0])
-		value := strings.TrimSpace(parts[1])
-
-		// Parse port forwarding
-		if strings.HasPrefix(key, "lxc.net.port_forward") {
-			parts := strings.Split(value, ":")
-			if len(parts) == 3 {
-				hostPort, _ := strconv.Atoi(parts[1])
-				guestPort, _ := strconv.Atoi(parts[2])
-				cfg.PortForwards = append(cfg.PortForwards, config.PortForward{
-					Protocol: parts[0],
-					Host:     hostPort,
-					Guest:    guestPort,
-				})
-			}
-			continue
-		}
-
-		// Parse interface configuration
-		if strings.HasPrefix(key, "lxc.net.") {
-			index := -1
-			if n, err := fmt.Sscanf(key, "lxc.net.%d", &index); err == nil && n == 1 {
-				if index != currentIndex {
-					currentIndex = index
-					currentIface = &config.NetworkInterface{}
-					cfg.Interfaces = append(cfg.Interfaces, *currentIface)
-				}
-			}
-
-			if currentIface != nil {
-				switch {
-				case strings.HasSuffix(key, ".type"):
-					currentIface.Type = value
-				case strings.HasSuffix(key, ".link"):
-					currentIface.Bridge = value
-				case strings.HasSuffix(key, ".name"):
-					currentIface.Interface = value
-				case strings.HasSuffix(key, ".ipv4.method"):
-					currentIface.DHCP = value == "dhcp"
-				case strings.HasSuffix(key, ".ipv4.address"):
-					currentIface.IP = value
-				case strings.HasSuffix(key, ".ipv4.gateway"):
-					currentIface.Gateway = value
-				case strings.HasSuffix(key, ".hostname"):
-					currentIface.Hostname = value
-				case strings.HasSuffix(key, ".mtu"):
-					if mtu, err := strconv.Atoi(value); err == nil {
-						currentIface.MTU = mtu
-					}
-				case strings.HasSuffix(key, ".hwaddr"):
-					currentIface.MAC = value
-				case strings.HasPrefix(key, "lxc.net."+strconv.Itoa(currentIndex)+".ipv4.nameserver."):
-					currentIface.DNS = append(currentIface.DNS, value)
-				}
-			}
-			continue
-		}
-
-		// Parse global DNS settings
-		if strings.HasPrefix(key, "lxc.net.dns.") {
-			cfg.DNSServers = append(cfg.DNSServers, value)
-			continue
-		}
-
-		// Parse search domains
-		if key == "lxc.net.search_domains" {
-			cfg.SearchDomains = strings.Fields(value)
-		}
-
-		// Check for network isolation
-		if key == "lxc.net.0.flags" && value == "down" {
-			cfg.Isolated = true
-		}
-	}
-
-	if err := scanner.Err(); err != nil {
-		return nil, fmt.Errorf("failed to parse network config: %w", err)
-	}
-
-	return cfg, nil
 }

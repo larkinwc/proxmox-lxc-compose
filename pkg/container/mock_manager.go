@@ -2,25 +2,26 @@ package container
 
 import (
 	"fmt"
-	"github.com/larkinwc/proxmox-lxc-compose/pkg/common"
+
+	"github.com/larkinwc/proxmox-lxc-compose/pkg/config"
 	"github.com/larkinwc/proxmox-lxc-compose/pkg/logging"
 )
 
 type MockLXCManager struct {
-	Containers       map[string]*common.Container
+	Containers       map[string]*config.Container
 	Templates        map[string]*Template
-	networkBandwidth map[string]map[string]*common.BandwidthLimit
+	networkBandwidth map[string]map[string]*config.BandwidthLimit
 }
 
 func NewMockLXCManager() *MockLXCManager {
 	return &MockLXCManager{
-		Containers:       make(map[string]*common.Container),
+		Containers:       make(map[string]*config.Container),
 		Templates:        make(map[string]*Template),
-		networkBandwidth: make(map[string]map[string]*common.BandwidthLimit),
+		networkBandwidth: make(map[string]map[string]*config.BandwidthLimit),
 	}
 }
 
-func (m *MockLXCManager) Create(name string, cfg *common.Container) error {
+func (m *MockLXCManager) Create(name string, cfg *config.Container) error {
 	if _, exists := m.Containers[name]; exists {
 		return fmt.Errorf("container %s already exists", name)
 	}
@@ -60,7 +61,7 @@ func (m *MockLXCManager) CreateContainerFromTemplate(templateName, containerName
 	if _, exists := m.Containers[containerName]; exists {
 		return fmt.Errorf("container %s already exists", containerName)
 	}
-	m.Containers[containerName] = &common.Container{}
+	m.Containers[containerName] = &config.Container{}
 	return nil
 }
 
@@ -74,14 +75,14 @@ func (m *MockLXCManager) CreateFromTemplate(templateName, containerName string, 
 	}
 
 	// Copy the template config
-	newConfig := &common.Container{
+	newConfig := &config.Container{
 		Image: template.Config.Image,
 	}
 	m.Containers[containerName] = newConfig
 	return nil
 }
 
-func (m *MockLXCManager) Get(containerName string) (*common.Container, error) {
+func (m *MockLXCManager) Get(containerName string) (*config.Container, error) {
 	if container, exists := m.Containers[containerName]; exists {
 		return container, nil
 	}
@@ -117,7 +118,7 @@ func (m *MockLXCManager) TestConnectivity(containerName string) error {
 	return nil
 }
 
-func (m *MockLXCManager) GetNetworkBandwidthLimits(containerName, iface string) (*common.BandwidthLimit, error) {
+func (m *MockLXCManager) GetNetworkBandwidthLimits(containerName, iface string) (*config.BandwidthLimit, error) {
 	if _, exists := m.Containers[containerName]; !exists {
 		return nil, fmt.Errorf("container %s does not exist", containerName)
 	}
@@ -133,13 +134,13 @@ func (m *MockLXCManager) GetNetworkBandwidthLimits(containerName, iface string) 
 	return nil, fmt.Errorf("no bandwidth limits found for container %s interface %s", containerName, iface)
 }
 
-func (m *MockLXCManager) UpdateNetworkBandwidthLimits(containerName, iface string, limits *common.BandwidthLimit) error {
+func (m *MockLXCManager) UpdateNetworkBandwidthLimits(containerName, iface string, limits *config.BandwidthLimit) error {
 	if _, exists := m.Containers[containerName]; !exists {
 		return fmt.Errorf("container %s does not exist", containerName)
 	}
 
 	if m.networkBandwidth[containerName] == nil {
-		m.networkBandwidth[containerName] = make(map[string]*common.BandwidthLimit)
+		m.networkBandwidth[containerName] = make(map[string]*config.BandwidthLimit)
 	}
 
 	m.networkBandwidth[containerName][iface] = limits

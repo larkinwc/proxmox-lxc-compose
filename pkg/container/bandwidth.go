@@ -8,7 +8,7 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/larkinwc/proxmox-lxc-compose/pkg/common"
+	"github.com/larkinwc/proxmox-lxc-compose/pkg/config"
 	"github.com/larkinwc/proxmox-lxc-compose/pkg/logging"
 )
 
@@ -61,7 +61,7 @@ func (m *LXCManager) SetNetworkBandwidthLimit(name string, limit NetworkBandwidt
 }
 
 // GetNetworkBandwidthLimits gets current bandwidth limits for a container's network interface
-func (m *LXCManager) GetNetworkBandwidthLimits(name, iface string) (*common.BandwidthLimit, error) {
+func (m *LXCManager) GetNetworkBandwidthLimits(name, iface string) (*config.BandwidthLimit, error) {
 	// Read tc class info using lxc-attach
 	args := []string{"-n", name, "--", "tc", "class", "show", "dev", iface}
 	cmdStr := fmt.Sprintf("lxc-attach %s", strings.Join(args, " "))
@@ -87,7 +87,7 @@ func (m *LXCManager) GetNetworkBandwidthLimits(name, iface string) (*common.Band
 	logging.Debug("tc command output", "output", output.String(), "output_len", len(output.String()))
 
 	// Parse tc output to get rate limits
-	limit := &common.BandwidthLimit{}
+	limit := &config.BandwidthLimit{}
 
 	// Parse tc output
 	for _, line := range strings.Split(output.String(), "\n") {
@@ -138,7 +138,7 @@ func (m *LXCManager) GetNetworkBandwidthLimits(name, iface string) (*common.Band
 }
 
 // UpdateNetworkBandwidthLimits updates bandwidth limits for a container's network interface
-func (m *LXCManager) UpdateNetworkBandwidthLimits(name, iface string, limits *common.BandwidthLimit) error {
+func (m *LXCManager) UpdateNetworkBandwidthLimits(name, iface string, limits *config.BandwidthLimit) error {
 	// Ensure container exists
 	containerPath := filepath.Join(m.configPath, name)
 	if _, err := os.Stat(containerPath); os.IsNotExist(err) {

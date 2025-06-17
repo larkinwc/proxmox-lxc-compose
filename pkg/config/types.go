@@ -166,3 +166,19 @@ type ResourceConfig struct {
 	MemorySwap   string `yaml:"memory_swap,omitempty" json:"memory_swap,omitempty"`
 	KernelMemory string `yaml:"kernel_memory,omitempty" json:"kernel_memory,omitempty"`
 }
+
+// BandwidthLimit defines bandwidth rate limiting configuration
+type BandwidthLimit struct {
+	IngressRate  string `yaml:"ingress_rate,omitempty" json:"ingress_rate,omitempty"`
+	IngressBurst string `yaml:"ingress_burst,omitempty" json:"ingress_burst,omitempty"`
+	EgressRate   string `yaml:"egress_rate,omitempty" json:"egress_rate,omitempty"`
+	EgressBurst  string `yaml:"egress_burst,omitempty" json:"egress_burst,omitempty"`
+}
+
+// Mount represents a mount point configuration
+type Mount struct {
+	Source  string   `yaml:"source" json:"source"`
+	Target  string   `yaml:"target" json:"target"`
+	Type    string   `yaml:"type" json:"type"`
+	Options []string `yaml:"options,omitempty" json:"options,omitempty"`
+}
