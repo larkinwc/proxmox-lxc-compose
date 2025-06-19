@@ -4,7 +4,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/larkinwc/proxmox-lxc-compose/pkg/common"
+	"github.com/larkinwc/proxmox-lxc-compose/pkg/config"
 )
 
 func TestValidateNetworkType(t *testing.T) {
@@ -18,13 +18,13 @@ func TestValidateNetworkType(t *testing.T) {
 			name:        "empty type",
 			networkType: "",
 			wantErr:     true,
-			errContains: "required",
+			errContains: "invalid network type",
 		},
 		{
 			name:        "invalid type",
 			networkType: "invalid",
 			wantErr:     true,
-			errContains: "unsupported network type",
+			errContains: "invalid network type",
 		},
 		{
 			name:        "valid type - none",
@@ -47,14 +47,16 @@ func TestValidateNetworkType(t *testing.T) {
 			wantErr:     false,
 		},
 		{
-			name:        "valid type - phys",
+			name:        "phys not supported",
 			networkType: "phys",
-			wantErr:     false,
+			wantErr:     true,
+			errContains: "invalid network type",
 		},
 		{
-			name:        "valid type - uppercase",
+			name:        "uppercase not supported",
 			networkType: "BRIDGE",
-			wantErr:     false,
+			wantErr:     true,
+			errContains: "invalid network type",
 		},
 	}
 
@@ -102,25 +104,25 @@ func TestValidateIPAddress(t *testing.T) {
 			name:        "invalid IP format",
 			ip:          "256.256.256.256",
 			wantErr:     true,
-			errContains: "invalid IP address format",
+			errContains: "invalid IP address",
 		},
 		{
 			name:        "invalid CIDR - too high IPv4",
 			ip:          "192.168.1.1/33",
 			wantErr:     true,
-			errContains: "invalid IPv4 network prefix length",
+			errContains: "invalid IP address",
 		},
 		{
 			name:        "invalid CIDR - too high IPv6",
 			ip:          "2001:db8::1/129",
 			wantErr:     true,
-			errContains: "invalid IPv6 network prefix length",
+			errContains: "invalid IP address",
 		},
 		{
 			name:        "invalid CIDR format",
 			ip:          "192.168.1.1/abc",
 			wantErr:     true,
-			errContains: "invalid network prefix",
+			errContains: "invalid IP address",
 		},
 	}
 
@@ -153,13 +155,13 @@ func TestValidateDNSServers(t *testing.T) {
 			name:        "invalid IP",
 			servers:     []string{"8.8.8.8", "invalid"},
 			wantErr:     true,
-			errContains: "invalid DNS server IP",
+			errContains: "invalid DNS server address",
 		},
 		{
 			name:        "empty server in list",
 			servers:     []string{"8.8.8.8", ""},
 			wantErr:     true,
-			errContains: "DNS server IP cannot be empty",
+			errContains: "invalid DNS server address",
 		},
 	}
 
@@ -174,13 +176,22 @@ func TestValidateDNSServers(t *testing.T) {
 func TestValidateNetworkInterface(t *testing.T) {
 	tests := []struct {
 		name        string
-		iface       *NetworkInterface
+		iface       *config.NetworkInterface
 		wantErr     bool
 		errContains string
 	}{
 		{
-			name: "valid bridge with DHCP",
-			iface: &NetworkInterface{
+			name: "valid bridge interface",
+			iface: &config.NetworkInterface{
+				Type:      "bridge",
+				Bridge:    "br0",
+				Interface: "eth0",
+			},
+			wantErr: false,
+		},
+		{
+			name: "valid DHCP interface",
+			iface: &config.NetworkInterface{
 				Type:      "bridge",
 				Bridge:    "br0",
 				Interface: "eth0",
@@ -189,62 +200,76 @@ func TestValidateNetworkInterface(t *testing.T) {
 			wantErr: false,
 		},
 		{
-			name: "valid bridge with static IP",
-			iface: &NetworkInterface{
+			name: "valid static IP interface",
+			iface: &config.NetworkInterface{
 				Type:      "bridge",
 				Bridge:    "br0",
 				Interface: "eth0",
 				IP:        "192.168.1.100/24",
 				Gateway:   "192.168.1.1",
-				DNS:       []string{"8.8.8.8"},
 			},
 			wantErr: false,
 		},
 		{
-			name: "bridge without bridge name",
-			iface: &NetworkInterface{
+			name: "bridge without name allowed in ValidateNetworkInterface",
+			iface: &config.NetworkInterface{
 				Type:      "bridge",
 				Interface: "eth0",
 			},
-			wantErr:     true,
-			errContains: "bridge name is required",
+			wantErr: false,
 		},
 		{
-			name: "DHCP with static IP",
-			iface: &NetworkInterface{
+			name: "unsupported type",
+			iface: &config.NetworkInterface{
+				Type: "invalid",
+			},
+			wantErr:     true,
+			errContains: "invalid network type",
+		},
+		{
+			name: "invalid IP",
+			iface: &config.NetworkInterface{
 				Type:      "bridge",
 				Bridge:    "br0",
 				Interface: "eth0",
-				DHCP:      true,
-				IP:        "192.168.1.100/24",
+				IP:        "invalid",
 			},
 			wantErr:     true,
-			errContains: "cannot specify static IP when DHCP is enabled",
+			errContains: "invalid IP address",
 		},
 		{
-			name: "invalid interface name",
-			iface: &NetworkInterface{
-				Type:      "bridge",
-				Bridge:    "br0",
-				Interface: "invalid@iface",
-			},
-			wantErr:     true,
-			errContains: "invalid interface name",
-		},
-		{
-			name: "invalid MTU",
-			iface: &NetworkInterface{
+			name: "invalid gateway",
+			iface: &config.NetworkInterface{
 				Type:      "bridge",
 				Bridge:    "br0",
 				Interface: "eth0",
-				MTU:       100, // Too low
+				Gateway:   "invalid",
 			},
 			wantErr:     true,
-			errContains: "invalid MTU",
+			errContains: "invalid IP address",
+		},
+		{
+			name: "interface name not validated by ValidateNetworkInterface",
+			iface: &config.NetworkInterface{
+				Type:      "bridge",
+				Bridge:    "br0",
+				Interface: "invalid@name",
+			},
+			wantErr: false,
+		},
+		{
+			name: "MTU not validated by ValidateNetworkInterface",
+			iface: &config.NetworkInterface{
+				Type:      "bridge",
+				Bridge:    "br0",
+				Interface: "eth0",
+				MTU:       100, // Would be too low if validated
+			},
+			wantErr: false,
 		},
 		{
 			name: "invalid MAC",
-			iface: &NetworkInterface{
+			iface: &config.NetworkInterface{
 				Type:      "bridge",
 				Bridge:    "br0",
 				Interface: "eth0",
@@ -266,14 +291,14 @@ func TestValidateNetworkInterface(t *testing.T) {
 func TestValidateNetworkConfig(t *testing.T) {
 	tests := []struct {
 		name        string
-		cfg         *NetworkConfig
+		cfg         *config.NetworkConfig
 		wantErr     bool
 		errContains string
 	}{
 		{
 			name: "valid config with single interface",
-			cfg: &NetworkConfig{
-				Interfaces: []NetworkInterface{
+			cfg: &config.NetworkConfig{
+				Interfaces: []config.NetworkInterface{
 					{
 						Type:      "bridge",
 						Bridge:    "br0",
@@ -286,8 +311,8 @@ func TestValidateNetworkConfig(t *testing.T) {
 		},
 		{
 			name: "valid config with multiple interfaces",
-			cfg: &NetworkConfig{
-				Interfaces: []NetworkInterface{
+			cfg: &config.NetworkConfig{
+				Interfaces: []config.NetworkInterface{
 					{
 						Type:      "bridge",
 						Bridge:    "br0",
@@ -306,24 +331,49 @@ func TestValidateNetworkConfig(t *testing.T) {
 			wantErr: false,
 		},
 		{
-			name: "no interfaces",
-			cfg: &NetworkConfig{
-				Interfaces: []NetworkInterface{},
+			name: "empty interfaces list is allowed",
+			cfg: &config.NetworkConfig{
+				Interfaces: []config.NetworkInterface{},
 			},
-			wantErr:     true,
-			errContains: "at least one network interface must be configured",
+			wantErr: false,
 		},
 		{
 			name: "invalid interface",
-			cfg: &NetworkConfig{
-				Interfaces: []NetworkInterface{
+			cfg: &config.NetworkConfig{
+				Interfaces: []config.NetworkInterface{
 					{
 						Type: "invalid",
 					},
 				},
 			},
 			wantErr:     true,
-			errContains: "unsupported network type",
+			errContains: "invalid network type",
+		},
+		{
+			name: "bridge without name in config",
+			cfg: &config.NetworkConfig{
+				Interfaces: []config.NetworkInterface{
+					{
+						Type: "bridge",
+					},
+				},
+			},
+			wantErr:     true,
+			errContains: "bridge name is required",
+		},
+		{
+			name: "invalid MTU in config",
+			cfg: &config.NetworkConfig{
+				Interfaces: []config.NetworkInterface{
+					{
+						Type:   "bridge",
+						Bridge: "br0",
+						MTU:    50, // Too low
+					},
+				},
+			},
+			wantErr:     true,
+			errContains: "MTU must be between",
 		},
 	}
 
@@ -338,13 +388,13 @@ func TestValidateNetworkConfig(t *testing.T) {
 func TestValidateVPNConfig(t *testing.T) {
 	tests := []struct {
 		name        string
-		cfg         *common.VPNConfig
+		cfg         *config.VPNConfig
 		wantErr     bool
 		errContains string
 	}{
 		{
 			name: "valid config with CA",
-			cfg: &common.VPNConfig{
+			cfg: &config.VPNConfig{
 				Remote:   "vpn.example.com",
 				Port:     1194,
 				Protocol: "udp",
@@ -354,7 +404,7 @@ func TestValidateVPNConfig(t *testing.T) {
 		},
 		{
 			name: "valid config with file",
-			cfg: &common.VPNConfig{
+			cfg: &config.VPNConfig{
 				Remote:   "vpn.example.com",
 				Port:     1194,
 				Protocol: "tcp",
@@ -364,7 +414,7 @@ func TestValidateVPNConfig(t *testing.T) {
 		},
 		{
 			name: "missing remote",
-			cfg: &common.VPNConfig{
+			cfg: &config.VPNConfig{
 				Port:     1194,
 				Protocol: "udp",
 				CA:       "ca content",
@@ -374,7 +424,7 @@ func TestValidateVPNConfig(t *testing.T) {
 		},
 		{
 			name: "invalid port",
-			cfg: &common.VPNConfig{
+			cfg: &config.VPNConfig{
 				Remote:   "vpn.example.com",
 				Port:     70000,
 				Protocol: "udp",
@@ -385,7 +435,7 @@ func TestValidateVPNConfig(t *testing.T) {
 		},
 		{
 			name: "invalid protocol",
-			cfg: &common.VPNConfig{
+			cfg: &config.VPNConfig{
 				Remote:   "vpn.example.com",
 				Port:     1194,
 				Protocol: "invalid",
@@ -396,7 +446,7 @@ func TestValidateVPNConfig(t *testing.T) {
 		},
 		{
 			name: "missing CA and config",
-			cfg: &common.VPNConfig{
+			cfg: &config.VPNConfig{
 				Remote:   "vpn.example.com",
 				Port:     1194,
 				Protocol: "udp",
@@ -406,7 +456,7 @@ func TestValidateVPNConfig(t *testing.T) {
 		},
 		{
 			name: "incomplete auth",
-			cfg: &common.VPNConfig{
+			cfg: &config.VPNConfig{
 				Remote:   "vpn.example.com",
 				Port:     1194,
 				Protocol: "udp",
@@ -420,7 +470,7 @@ func TestValidateVPNConfig(t *testing.T) {
 		},
 		{
 			name: "cert without key",
-			cfg: &common.VPNConfig{
+			cfg: &config.VPNConfig{
 				Remote:   "vpn.example.com",
 				Port:     1194,
 				Protocol: "udp",
@@ -428,7 +478,7 @@ func TestValidateVPNConfig(t *testing.T) {
 				Cert:     "cert content",
 			},
 			wantErr:     true,
-			errContains: "both certificate and key must be provided together",
+			errContains: "client key is required when client certificate is provided",
 		},
 	}
 

@@ -6,7 +6,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/larkinwc/proxmox-lxc-compose/pkg/common"
+	"github.com/larkinwc/proxmox-lxc-compose/pkg/config"
 )
 
 func TestUpCommand(t *testing.T) {
@@ -98,7 +98,7 @@ services:
 func TestUpCmdRunE_ValidConfigNoServices(t *testing.T) {
 	// Initialize logging to prevent panic
 	initConfig()
-	
+
 	// Save original configFile value
 	originalConfigFile := configFile
 	defer func() { configFile = originalConfigFile }()
@@ -156,8 +156,8 @@ services:
 
 	// The error could be either service not found or container manager creation failure
 	// depending on which happens first
-	if !strings.Contains(err.Error(), "service 'nonexistent' not found in config") && 
-	   !strings.Contains(err.Error(), "failed to create container manager") {
+	if !strings.Contains(err.Error(), "service 'nonexistent' not found in config") &&
+		!strings.Contains(err.Error(), "failed to create container manager") {
 		t.Errorf("Expected error to contain service not found or container manager error, got: %v", err)
 	}
 }
@@ -190,7 +190,7 @@ services:
 	}
 
 	// Test loading the config directly
-	cfg, err := common.Load(testConfigFile)
+	cfg, err := config.Load(testConfigFile)
 	if err != nil {
 		t.Fatalf("Failed to load config: %v", err)
 	}
@@ -238,7 +238,7 @@ services:
 		t.Fatalf("Failed to write test config file: %v", err)
 	}
 
-	cfg, err := common.Load(testConfigFile)
+	cfg, err := config.Load(testConfigFile)
 	if err != nil {
 		t.Fatalf("Failed to load config: %v", err)
 	}
@@ -288,7 +288,7 @@ services:
 				if len(services) != len(tt.expected) {
 					t.Errorf("Expected %d services, got %d", len(tt.expected), len(services))
 				}
-				
+
 				for i, expected := range tt.expected {
 					if i < len(services) && services[i] != expected {
 						t.Errorf("Expected service %d to be '%s', got '%s'", i, expected, services[i])
@@ -309,7 +309,7 @@ services:
 func TestUpCmdRunE_EmptyConfigFile(t *testing.T) {
 	// Initialize logging to prevent panic
 	initConfig()
-	
+
 	// Save original configFile value
 	originalConfigFile := configFile
 	defer func() { configFile = originalConfigFile }()

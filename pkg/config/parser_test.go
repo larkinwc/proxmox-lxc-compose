@@ -49,11 +49,16 @@ func TestLoadConfig(t *testing.T) {
 
 			if tt.configPath == filepath.Join("testdata", "valid.yaml") {
 				// Verify expected values from valid.yaml (app container)
-				if cfg.Image != "ubuntu:20.04" {
-					t.Errorf("expected image ubuntu:20.04, got %s", cfg.Image)
+				app, exists := cfg.Services["app"]
+				if !exists {
+					t.Fatal("expected app service in config")
 				}
 
-				network := cfg.Network
+				if app.Image != "ubuntu:20.04" {
+					t.Errorf("expected image ubuntu:20.04, got %s", app.Image)
+				}
+
+				network := app.Network
 				if network == nil {
 					t.Fatal("expected network config, got nil")
 				}
@@ -64,7 +69,7 @@ func TestLoadConfig(t *testing.T) {
 					t.Errorf("expected IP 10.0.3.100/24, got %s", network.IP)
 				}
 
-				security := cfg.Security
+				security := app.Security
 				if security == nil {
 					t.Fatal("expected security config, got nil")
 				}
@@ -75,7 +80,7 @@ func TestLoadConfig(t *testing.T) {
 					t.Errorf("expected 2 capabilities, got %d", len(security.Capabilities))
 				}
 
-				storage := cfg.Storage
+				storage := app.Storage
 				if storage == nil {
 					t.Fatal("expected storage config, got nil")
 				}

@@ -54,7 +54,7 @@ func TestDownCmdRunE_ConfigFileNotFound(t *testing.T) {
 	// Save original values
 	originalConfigFile := configFile
 	originalRemoveContainers := removeContainers
-	defer func() { 
+	defer func() {
 		configFile = originalConfigFile
 		removeContainers = originalRemoveContainers
 	}()
@@ -63,7 +63,7 @@ func TestDownCmdRunE_ConfigFileNotFound(t *testing.T) {
 	configFile = "non-existent-file.yml"
 	removeContainers = false
 
-	err := downCmdRunE(nil, []string{})
+	err := downCmdRunE(nil, []string{}, configFile)
 	if err == nil {
 		t.Error("Expected error for non-existent config file")
 	}
@@ -77,7 +77,7 @@ func TestDownCmdRunE_InvalidConfig(t *testing.T) {
 	// Save original values
 	originalConfigFile := configFile
 	originalRemoveContainers := removeContainers
-	defer func() { 
+	defer func() {
 		configFile = originalConfigFile
 		removeContainers = originalRemoveContainers
 	}()
@@ -99,7 +99,7 @@ services:
 		t.Fatalf("Failed to write test config file: %v", err)
 	}
 
-	err = downCmdRunE(nil, []string{})
+	err = downCmdRunE(nil, []string{}, configFile)
 	if err == nil {
 		t.Error("Expected error for invalid config file")
 	}
@@ -112,11 +112,11 @@ services:
 func TestDownCmdRunE_ValidConfigNoServices(t *testing.T) {
 	// Initialize logging to prevent panic
 	initConfig()
-	
+
 	// Save original values
 	originalConfigFile := configFile
 	originalRemoveContainers := removeContainers
-	defer func() { 
+	defer func() {
 		configFile = originalConfigFile
 		removeContainers = originalRemoveContainers
 	}()
@@ -137,7 +137,7 @@ services: {}
 
 	// This should fail when trying to create container manager
 	// since we don't have LXC installed in test environment
-	err = downCmdRunE(nil, []string{})
+	err = downCmdRunE(nil, []string{}, configFile)
 	if err == nil {
 		t.Error("Expected error when creating container manager without LXC")
 	}
@@ -151,7 +151,7 @@ func TestDownCmdRunE_ServiceNotFound(t *testing.T) {
 	// Save original values
 	originalConfigFile := configFile
 	originalRemoveContainers := removeContainers
-	defer func() { 
+	defer func() {
 		configFile = originalConfigFile
 		removeContainers = originalRemoveContainers
 	}()
@@ -173,15 +173,15 @@ services:
 	}
 
 	// Try to stop a service that doesn't exist
-	err = downCmdRunE(nil, []string{"nonexistent"})
+	err = downCmdRunE(nil, []string{"nonexistent"}, configFile)
 	if err == nil {
 		t.Error("Expected error for non-existent service")
 	}
 
 	// The error could be either service not found or container manager creation failure
 	// depending on which happens first
-	if !strings.Contains(err.Error(), "service 'nonexistent' not found in config") && 
-	   !strings.Contains(err.Error(), "failed to create container manager") {
+	if !strings.Contains(err.Error(), "service 'nonexistent' not found in config") &&
+		!strings.Contains(err.Error(), "failed to create container manager") {
 		t.Errorf("Expected error to contain service not found or container manager error, got: %v", err)
 	}
 }
@@ -193,18 +193,18 @@ func TestDownCmdRunE_RemoveContainersFlag(t *testing.T) {
 	defer func() { removeContainers = originalRemoveContainers }()
 
 	tests := []struct {
-		name            string
-		removeFlag      bool
+		name             string
+		removeFlag       bool
 		expectedBehavior string
 	}{
 		{
-			name:            "remove containers enabled",
-			removeFlag:      true,
+			name:             "remove containers enabled",
+			removeFlag:       true,
 			expectedBehavior: "should remove containers",
 		},
 		{
-			name:            "remove containers disabled",
-			removeFlag:      false,
+			name:             "remove containers disabled",
+			removeFlag:       false,
 			expectedBehavior: "should not remove containers",
 		},
 	}
@@ -212,7 +212,7 @@ func TestDownCmdRunE_RemoveContainersFlag(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			removeContainers = tt.removeFlag
-			
+
 			// The actual behavior testing would require mocking the container manager
 			// For now, we just verify the flag is set correctly
 			if removeContainers != tt.removeFlag {
@@ -244,7 +244,7 @@ services:
 
 	// Note: The current implementation has a bug where it tries to access cfg.Services["default"]
 	// but cfg is already a ComposeConfig. This test documents the current behavior.
-	
+
 	// Test service selection logic (conceptually)
 	tests := []struct {
 		name     string
@@ -272,7 +272,7 @@ services:
 		t.Run(tt.name, func(t *testing.T) {
 			// This test documents the intended behavior
 			// The actual implementation would need to be fixed to work correctly
-			
+
 			var services []string
 			if len(tt.args) == 0 {
 				// Should iterate over all services in config
@@ -291,7 +291,7 @@ services:
 				if len(services) != len(tt.expected) {
 					t.Errorf("Expected %d services, got %d", len(tt.expected), len(services))
 				}
-				
+
 				for i, expected := range tt.expected {
 					if i < len(services) && services[i] != expected {
 						t.Errorf("Expected service %d to be '%s', got '%s'", i, expected, services[i])
@@ -305,11 +305,11 @@ services:
 func TestDownCmdRunE_EmptyConfigFile(t *testing.T) {
 	// Initialize logging to prevent panic
 	initConfig()
-	
+
 	// Save original values
 	originalConfigFile := configFile
 	originalRemoveContainers := removeContainers
-	defer func() { 
+	defer func() {
 		configFile = originalConfigFile
 		removeContainers = originalRemoveContainers
 	}()
@@ -325,7 +325,7 @@ func TestDownCmdRunE_EmptyConfigFile(t *testing.T) {
 	}
 
 	// This should fail when trying to create container manager
-	err = downCmdRunE(nil, []string{})
+	err = downCmdRunE(nil, []string{}, configFile)
 	if err == nil {
 		t.Error("Expected error when creating container manager without LXC")
 	}
@@ -339,7 +339,7 @@ func TestDownCmdRunE_DefaultConfigFile(t *testing.T) {
 	// Save original values
 	originalConfigFile := configFile
 	originalRemoveContainers := removeContainers
-	defer func() { 
+	defer func() {
 		configFile = originalConfigFile
 		removeContainers = originalRemoveContainers
 	}()
@@ -348,7 +348,7 @@ func TestDownCmdRunE_DefaultConfigFile(t *testing.T) {
 	configFile = ""
 	removeContainers = false
 
-	err := downCmdRunE(nil, []string{})
+	err := downCmdRunE(nil, []string{}, configFile)
 	if err == nil {
 		t.Error("Expected error when no config file specified and default doesn't exist")
 	}
@@ -362,11 +362,11 @@ func TestDownCmdRunE_DefaultConfigFile(t *testing.T) {
 func TestDownCmdRunE_ConfigConversionBug(t *testing.T) {
 	// This test documents the bug in the current implementation
 	// where the code tries to access cfg.Services["default"] but cfg is already a ComposeConfig
-	
+
 	// Save original values
 	originalConfigFile := configFile
 	originalRemoveContainers := removeContainers
-	defer func() { 
+	defer func() {
 		configFile = originalConfigFile
 		removeContainers = originalRemoveContainers
 	}()
@@ -392,9 +392,9 @@ services:
 	// The current implementation has a bug in lines 36-40 of down.go:
 	// It creates a new ComposeConfig and tries to access cfg.Services["default"]
 	// but cfg is already a *ComposeConfig, not a Container
-	
+
 	// This should fail when trying to create container manager anyway
-	err = downCmdRunE(nil, []string{})
+	err = downCmdRunE(nil, []string{}, configFile)
 	if err == nil {
 		t.Error("Expected error when creating container manager without LXC")
 	}

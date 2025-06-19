@@ -19,6 +19,11 @@ func Load(configFile string) (*ComposeConfig, error) {
 		return nil, fmt.Errorf("failed to parse config file: %w", err)
 	}
 
+	// Validate the configuration
+	if err := ValidateConfig(&config); err != nil {
+		return nil, fmt.Errorf("invalid configuration: %w", err)
+	}
+
 	return &config, nil
 }
 
@@ -103,6 +108,11 @@ func validateContainer(name string, container *Container) error {
 	// Apply storage defaults
 	if container.Storage == nil {
 		container.Storage = container.DefaultStorageConfig()
+	}
+
+	// Perform full container validation
+	if err := ValidateContainer(container); err != nil {
+		return fmt.Errorf("service '%s': %w", name, err)
 	}
 
 	return nil

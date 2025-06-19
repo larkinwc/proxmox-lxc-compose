@@ -56,18 +56,19 @@ type MountConfig struct {
 
 // NetworkInterface represents a single network interface configuration
 type NetworkInterface struct {
-	Type         string   `yaml:"type" json:"type"`
-	Bridge       string   `yaml:"bridge,omitempty" json:"bridge,omitempty"`
-	Interface    string   `yaml:"interface,omitempty" json:"interface,omitempty"`
-	IP           string   `yaml:"ip,omitempty" json:"ip,omitempty"`
-	Gateway      string   `yaml:"gateway,omitempty" json:"gateway,omitempty"`
-	DNS          []string `yaml:"dns,omitempty" json:"dns,omitempty"`
-	DHCP         bool     `yaml:"dhcp,omitempty" json:"dhcp,omitempty"`
-	Hostname     string   `yaml:"hostname,omitempty" json:"hostname,omitempty"`
-	MTU          int      `yaml:"mtu,omitempty" json:"mtu,omitempty"`
-	MAC          string   `yaml:"mac,omitempty" json:"mac,omitempty"`
-	BandwidthIn  int64    `yaml:"bandwidth_in,omitempty" json:"bandwidth_in,omitempty"`   // Ingress bandwidth limit in bytes per second
-	BandwidthOut int64    `yaml:"bandwidth_out,omitempty" json:"bandwidth_out,omitempty"` // Egress bandwidth limit in bytes per second
+	Type         string          `yaml:"type" json:"type"`
+	Bridge       string          `yaml:"bridge,omitempty" json:"bridge,omitempty"`
+	Interface    string          `yaml:"interface,omitempty" json:"interface,omitempty"`
+	IP           string          `yaml:"ip,omitempty" json:"ip,omitempty"`
+	Gateway      string          `yaml:"gateway,omitempty" json:"gateway,omitempty"`
+	DNS          []string        `yaml:"dns,omitempty" json:"dns,omitempty"`
+	DHCP         bool            `yaml:"dhcp,omitempty" json:"dhcp,omitempty"`
+	Hostname     string          `yaml:"hostname,omitempty" json:"hostname,omitempty"`
+	MTU          int             `yaml:"mtu,omitempty" json:"mtu,omitempty"`
+	MAC          string          `yaml:"mac,omitempty" json:"mac,omitempty"`
+	BandwidthIn  int64           `yaml:"bandwidth_in,omitempty" json:"bandwidth_in,omitempty"`   // Ingress bandwidth limit in bytes per second
+	BandwidthOut int64           `yaml:"bandwidth_out,omitempty" json:"bandwidth_out,omitempty"` // Egress bandwidth limit in bytes per second
+	Bandwidth    *BandwidthLimit `yaml:"bandwidth,omitempty" json:"bandwidth,omitempty"`         // Structured bandwidth configuration
 }
 
 // PortForward represents a port forwarding configuration

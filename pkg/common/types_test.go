@@ -581,20 +581,18 @@ func TestYAMLMarshaling(t *testing.T) {
 		{
 			name: "NetworkInterface",
 			data: &config.NetworkInterface{
-				Type:      "bridge",
-				Bridge:    "lxcbr0",
-				Interface: "eth0",
-				IP:        "192.168.1.100/24",
-				Gateway:   "192.168.1.1",
-				DNS:       []string{"8.8.8.8", "8.8.4.4"},
-				DHCP:      false,
-				Hostname:  "container",
-				MTU:       1500,
-				MAC:       "aa:bb:cc:dd:ee:ff",
-				Bandwidth: &config.BandwidthLimit{
-					IngressRate: "1mbit",
-					EgressRate:  "500kbit",
-				},
+				Type:         "bridge",
+				Bridge:       "lxcbr0",
+				Interface:    "eth0",
+				IP:           "192.168.1.100/24",
+				Gateway:      "192.168.1.1",
+				DNS:          []string{"8.8.8.8", "8.8.4.4"},
+				DHCP:         false,
+				Hostname:     "container",
+				MTU:          1500,
+				MAC:          "aa:bb:cc:dd:ee:ff",
+				BandwidthIn:  1000000, // 1 MB/s
+				BandwidthOut: 500000,  // 500 KB/s
 			},
 		},
 		{
@@ -676,13 +674,6 @@ func TestYAMLMarshaling(t *testing.T) {
 					Cores:  2,
 					Memory: "1G",
 				},
-				Ports: []config.PortForward{
-					{Protocol: "tcp", Host: 8080, Guest: 80},
-				},
-				Volumes: []string{"/host:/container"},
-				Env: map[string]string{
-					"ENV_VAR": "value",
-				},
 				Command:    []string{"/bin/sh", "-c", "nginx"},
 				Entrypoint: []string{"/entrypoint.sh"},
 				Environment: map[string]string{
@@ -717,8 +708,8 @@ func TestYAMLMarshaling(t *testing.T) {
 			data: &config.NetworkInterface{
 				Type:         "bridge",
 				Bridge:       "lxcbr0",
-				BandwidthIn:  int64(100000000), // 100 MB/s
-				BandwidthOut: int64(50000000),  // 50 MB/s
+				BandwidthIn:  100000000, // 100 MB/s
+				BandwidthOut: 50000000,  // 50 MB/s
 			},
 		},
 	}
@@ -779,19 +770,15 @@ func TestComplexNetworkConfig(t *testing.T) {
 		Bridge: "lxcbr0",
 		Interfaces: []config.NetworkInterface{
 			{
-				Type:    "bridge",
-				Bridge:  "lxcbr0",
-				IP:      "192.168.1.100/24",
-				Gateway: "192.168.1.1",
-				DNS:     []string{"8.8.8.8", "8.8.4.4"},
-				MTU:     1500,
-				MAC:     "aa:bb:cc:dd:ee:ff",
-				Bandwidth: &config.BandwidthLimit{
-					IngressRate:  "1mbit",
-					IngressBurst: "2mbit",
-					EgressRate:   "500kbit",
-					EgressBurst:  "1mbit",
-				},
+				Type:         "bridge",
+				Bridge:       "lxcbr0",
+				IP:           "192.168.1.100/24",
+				Gateway:      "192.168.1.1",
+				DNS:          []string{"8.8.8.8", "8.8.4.4"},
+				MTU:          1500,
+				MAC:          "aa:bb:cc:dd:ee:ff",
+				BandwidthIn:  1000000, // 1 MB/s
+				BandwidthOut: 500000,  // 500 KB/s
 			},
 			{
 				Type: "veth",

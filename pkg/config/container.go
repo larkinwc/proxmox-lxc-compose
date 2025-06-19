@@ -92,6 +92,11 @@ func validateSecurityConfig(config *SecurityConfig) error {
 		return nil
 	}
 
+	// Set default isolation if not specified
+	if config.Isolation == "" {
+		config.Isolation = "default"
+	}
+
 	validIsolationLevels := map[string]bool{
 		"default":    true,
 		"strict":     true,
