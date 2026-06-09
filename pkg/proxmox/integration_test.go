@@ -40,7 +40,7 @@ func testVMID(t *testing.T) int {
 	t.Helper()
 	v := os.Getenv("PROXMOX_TEST_VMID")
 	if v == "" {
-		v = "999"
+		t.Fatal("set PROXMOX_TEST_VMID to a dedicated disposable VMID; these tests stop/destroy it")
 	}
 	vmid, err := strconv.Atoi(v)
 	if err != nil {

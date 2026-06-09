@@ -91,6 +91,7 @@ func (f *fakeBackend) Destroy(vmid int) error {
 	delete(f.created, vmid)
 	delete(f.status, vmid)
 	delete(f.names, vmid)
+	delete(f.initCmds, vmid)
 	return nil
 }
 

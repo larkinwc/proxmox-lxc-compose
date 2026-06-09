@@ -71,13 +71,17 @@ http_dl "${base_url}/${archive}" "${tmp}/${archive}" \
 
 # --- verify checksum if available -------------------------------------------
 if http_dl "${base_url}/checksums.txt" "${tmp}/checksums.txt" 2>/dev/null; then
-  if command -v sha256sum >/dev/null 2>&1; then
-    expected="$(grep " ${archive}\$" "${tmp}/checksums.txt" | awk '{print $1}')"
-    if [ -n "$expected" ]; then
+  expected="$(grep " ${archive}\$" "${tmp}/checksums.txt" | awk '{print $1}')"
+  if [ -n "$expected" ]; then
+    if command -v sha256sum >/dev/null 2>&1; then
       actual="$(sha256sum "${tmp}/${archive}" | awk '{print $1}')"
-      [ "$expected" = "$actual" ] || err "checksum mismatch for ${archive}"
-      info "Checksum verified."
+    elif command -v shasum >/dev/null 2>&1; then
+      actual="$(shasum -a 256 "${tmp}/${archive}" | awk '{print $1}')"
+    else
+      err "checksums.txt found but no SHA-256 tool is installed (need sha256sum or shasum)"
     fi
+    [ "$expected" = "$actual" ] || err "checksum mismatch for ${archive}"
+    info "Checksum verified."
   fi
 fi
 
@@ -87,10 +91,12 @@ chmod +x "${tmp}/${BINARY}"
 
 # --- install -----------------------------------------------------------------
 if [ -w "$INSTALL_DIR" ] || [ "$(id -u)" = "0" ]; then
-  mv "${tmp}/${BINARY}" "${INSTALL_DIR}/${BINARY}"
+  mkdir -p "$INSTALL_DIR"
+  install -m 0755 "${tmp}/${BINARY}" "${INSTALL_DIR}/${BINARY}"
 elif command -v sudo >/dev/null 2>&1; then
   info "Elevating with sudo to write to ${INSTALL_DIR}..."
-  sudo mv "${tmp}/${BINARY}" "${INSTALL_DIR}/${BINARY}"
+  sudo mkdir -p "$INSTALL_DIR"
+  sudo install -m 0755 "${tmp}/${BINARY}" "${INSTALL_DIR}/${BINARY}"
 else
   err "cannot write to ${INSTALL_DIR}; re-run as root or set INSTALL_DIR=\$HOME/bin"
 fi

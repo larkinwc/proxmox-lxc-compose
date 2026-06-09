@@ -64,8 +64,15 @@ func (s *VMIDStore) save() error {
 	if err != nil {
 		return fmt.Errorf("failed to marshal vmid store: %w", err)
 	}
-	if err := os.WriteFile(s.path, data, 0644); err != nil {
-		return fmt.Errorf("failed to write vmid store: %w", err)
+	// Write to a temp file and rename so an interrupted save never leaves a
+	// partial vmids.json that subsequent loads would reject.
+	tmp := s.path + ".tmp"
+	if err := os.WriteFile(tmp, data, 0644); err != nil {
+		return fmt.Errorf("failed to write vmid store temp file: %w", err)
+	}
+	if err := os.Rename(tmp, s.path); err != nil {
+		_ = os.Remove(tmp)
+		return fmt.Errorf("failed to replace vmid store atomically: %w", err)
 	}
 	return nil
 }

@@ -2,6 +2,7 @@ package proxmox
 
 import (
 	"fmt"
+	"math"
 	"regexp"
 	"strconv"
 	"strings"
@@ -153,7 +154,10 @@ func translateMount(m common.Mount, storage string) string {
 	// volume; for managed volumes it uses storage:size. We treat an absolute
 	// source path as a bind mount.
 	vol := m.Source
-	if !strings.HasPrefix(m.Source, "/") && storage != "" {
+	isBind := strings.HasPrefix(m.Source, "/") ||
+		strings.HasPrefix(m.Source, "./") ||
+		strings.HasPrefix(m.Source, "../")
+	if !isBind && storage != "" {
 		vol = storage + ":" + m.Source
 	}
 	parts := []string{vol, "mp=" + m.Target}
@@ -212,8 +216,12 @@ func Translate(c *common.Container, opts TranslateOptions) (CreateOptions, error
 			co.CPUUnits = int(*c.CPU.Shares)
 		}
 		// Proxmox cpulimit is a count of cores; derive from quota/period if set.
+		// Round up so a fractional limit (quota < period) isn't silently dropped.
 		if c.CPU.Quota != nil && c.CPU.Period != nil && *c.CPU.Period > 0 {
-			co.CPULimit = int(*c.CPU.Quota / *c.CPU.Period)
+			limit := float64(*c.CPU.Quota) / float64(*c.CPU.Period)
+			if limit > 0 {
+				co.CPULimit = int(math.Ceil(limit))
+			}
 		}
 	}
 

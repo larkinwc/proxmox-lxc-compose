@@ -174,18 +174,28 @@ func (b *PCTBackend) SetInitCommand(vmid int, initPath string) error {
 	}
 
 	line := "lxc.init.cmd: " + initPath
-	// Don't duplicate the key if it's already present.
-	for _, existing := range strings.Split(string(data), "\n") {
-		if strings.TrimSpace(existing) == line {
+	// Replace an existing lxc.init.cmd line (which may have a different value)
+	// rather than appending a second, conflicting key.
+	lines := strings.Split(string(data), "\n")
+	replaced := false
+	for i, existing := range lines {
+		trimmed := strings.TrimSpace(existing)
+		if trimmed == line {
 			return nil
 		}
+		if strings.HasPrefix(trimmed, "lxc.init.cmd:") {
+			lines[i] = line
+			replaced = true
+		}
+	}
+	if !replaced {
+		lines = append(lines, line)
 	}
 
-	content := string(data)
+	content := strings.Join(lines, "\n")
 	if !strings.HasSuffix(content, "\n") {
 		content += "\n"
 	}
-	content += line + "\n"
 	if err := os.WriteFile(confPath, []byte(content), 0640); err != nil {
 		return fmt.Errorf("failed to write init command to %s: %w", confPath, err)
 	}

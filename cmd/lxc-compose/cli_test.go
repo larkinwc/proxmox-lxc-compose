@@ -30,14 +30,30 @@ func setupBackendTest(t *testing.T) (*fakeBackend, func()) {
 	fake := newFakeBackend()
 	origFactory := proxmoxBackendFactory
 	origStorePath := vmidStorePath
+	origConfigFile := configFile
+	origConvertFn := ociConvertFn
+	origCacheDir := templateCacheDir
 
 	proxmoxBackendFactory = func() (proxmox.Backend, error) { return fake, nil }
 	vmidStorePath = filepath.Join(t.TempDir(), "vmids.json")
 
+	// Keep image conversion off the real filesystem/Docker: point the cache at
+	// a temp dir and stub the converter so `up` never shells out or writes to
+	// /var/lib/vz (which fails for non-root CI).
+	templateCacheDir = t.TempDir()
+	ociConvertFn = func(_, outPath string) (*oci.ConvertResult, error) {
+		if err := os.WriteFile(outPath, []byte("fake-template"), 0644); err != nil {
+			return nil, err
+		}
+		return &oci.ConvertResult{OutputPath: outPath, InitWrapperPath: oci.InitWrapperPath}, nil
+	}
+
 	cleanup := func() {
 		proxmoxBackendFactory = origFactory
 		vmidStorePath = origStorePath
-		configFile = ""
+		configFile = origConfigFile
+		ociConvertFn = origConvertFn
+		templateCacheDir = origCacheDir
 	}
 	return fake, cleanup
 }
@@ -52,6 +68,7 @@ func setupManagerTest(t *testing.T) func() {
 		t.Fatal(err)
 	}
 	origPath := lxcConfigPath
+	origEnv, hadEnv := os.LookupEnv("CONTAINER_CONFIG_PATH")
 	lxcConfigPath = tmpDir
 	os.Setenv("CONTAINER_CONFIG_PATH", tmpDir)
 
@@ -61,7 +78,11 @@ func setupManagerTest(t *testing.T) func() {
 	return func() {
 		cleanupMock()
 		lxcConfigPath = origPath
-		os.Unsetenv("CONTAINER_CONFIG_PATH")
+		if hadEnv {
+			_ = os.Setenv("CONTAINER_CONFIG_PATH", origEnv)
+		} else {
+			_ = os.Unsetenv("CONTAINER_CONFIG_PATH")
+		}
 	}
 }
 

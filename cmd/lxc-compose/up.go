@@ -2,6 +2,7 @@ package main
 
 import (
 	"fmt"
+	"sort"
 
 	"github.com/larkinwc/proxmox-lxc-compose/pkg/common"
 	"github.com/larkinwc/proxmox-lxc-compose/pkg/proxmox"
@@ -61,15 +62,20 @@ func upCmdRunE(cmd *cobra.Command, args []string) error {
 		return err
 	}
 
-	// Start all or specified services
+	// Start all or specified services. Sort the auto-selected set so VMID
+	// assignment is deterministic regardless of Go's map iteration order.
 	services := args
 	if len(services) == 0 {
 		for name := range compose.Services {
 			services = append(services, name)
 		}
+		sort.Strings(services)
 	}
 
-	inUse := backendVMIDs(backend)
+	inUse, err := backendVMIDs(backend)
+	if err != nil {
+		return err
+	}
 
 	for _, name := range services {
 		svcCfg, ok := compose.Services[name]

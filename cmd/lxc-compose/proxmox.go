@@ -142,15 +142,17 @@ func prepareTemplate(name, image string, force bool) (preparedTemplate, error) {
 	}, nil
 }
 
-// backendVMIDs returns the VMIDs currently present on the node (best effort).
-func backendVMIDs(b proxmox.Backend) []int {
+// backendVMIDs returns the VMIDs currently present on the node. An error here
+// must not be swallowed: proceeding with an empty in-use set could allocate a
+// VMID that already exists on the node.
+func backendVMIDs(b proxmox.Backend) ([]int, error) {
 	infos, err := b.List()
 	if err != nil {
-		return nil
+		return nil, fmt.Errorf("failed to list existing containers: %w", err)
 	}
 	ids := make([]int, 0, len(infos))
 	for _, info := range infos {
 		ids = append(ids, info.VMID)
 	}
-	return ids
+	return ids, nil
 }

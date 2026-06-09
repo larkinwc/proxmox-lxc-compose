@@ -12,6 +12,16 @@ import (
 	"github.com/larkinwc/proxmox-lxc-compose/pkg/common"
 )
 
+// validateTemplateName rejects names that could escape the templates directory
+// when joined into filesystem paths (separators, "..", or empty).
+func validateTemplateName(name string) error {
+	if name == "" || name != filepath.Base(name) ||
+		strings.ContainsAny(name, `/\`) || strings.Contains(name, "..") {
+		return fmt.Errorf("invalid template name: %q", name)
+	}
+	return nil
+}
+
 // Template represents a container template
 type Template struct {
 	Name        string            `json:"name"`
@@ -22,6 +32,9 @@ type Template struct {
 
 // CreateTemplate creates a new template from an existing container
 func (m *LXCManager) CreateTemplate(containerName string, templateName string, description string) error {
+	if err := validateTemplateName(templateName); err != nil {
+		return err
+	}
 	// Get the container configuration
 	container, err := m.Get(containerName)
 	if err != nil {
@@ -66,6 +79,9 @@ func (m *LXCManager) CreateTemplate(containerName string, templateName string, d
 
 // GetTemplate retrieves a template by name
 func (m *LXCManager) GetTemplate(name string) (*Template, error) {
+	if err := validateTemplateName(name); err != nil {
+		return nil, err
+	}
 	templatePath := filepath.Join(m.configPath, "templates", name+".json")
 	data, err := os.ReadFile(templatePath)
 	if err != nil {
@@ -112,6 +128,9 @@ func (m *LXCManager) ListTemplates() ([]*Template, error) {
 
 // DeleteTemplate removes a template and its associated files
 func (m *LXCManager) DeleteTemplate(name string) error {
+	if err := validateTemplateName(name); err != nil {
+		return err
+	}
 	templatesDir := filepath.Join(m.configPath, "templates")
 	metadataPath := filepath.Join(templatesDir, name+".json")
 

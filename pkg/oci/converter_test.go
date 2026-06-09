@@ -56,7 +56,9 @@ func TestConvertOCIToLXCFlow(t *testing.T) {
 			// Use the real tar for extract/pack against the mocked stream.
 			return exec.Command(name, args...)
 		default:
-			return helperCommand(t, "noop", args...)
+			// Fail loudly so an unexpected command surfaces as a test failure
+			// instead of silently passing.
+			return helperCommand(t, "unexpected", append([]string{name}, args...)...)
 		}
 	}
 
@@ -126,6 +128,9 @@ func TestHelperProcess(_ *testing.T) {
 			os.Exit(1)
 		}
 		os.Exit(0)
+	case "unexpected":
+		os.Stderr.WriteString("unexpected command path in test mock\n")
+		os.Exit(1)
 	default:
 		os.Exit(0)
 	}
@@ -140,10 +145,18 @@ func emitRootfsTar() error {
 	}
 	defer os.RemoveAll(dir)
 
-	_ = os.MkdirAll(filepath.Join(dir, "etc"), 0755)
-	_ = os.WriteFile(filepath.Join(dir, "etc", "os-release"), []byte(`NAME="Alpine Linux"`), 0644)
-	_ = os.MkdirAll(filepath.Join(dir, "var", "log", "nginx"), 0755)
-	_ = os.Symlink("/dev/stdout", filepath.Join(dir, "var", "log", "nginx", "access.log"))
+	if err := os.MkdirAll(filepath.Join(dir, "etc"), 0755); err != nil {
+		return err
+	}
+	if err := os.WriteFile(filepath.Join(dir, "etc", "os-release"), []byte(`NAME="Alpine Linux"`), 0644); err != nil {
+		return err
+	}
+	if err := os.MkdirAll(filepath.Join(dir, "var", "log", "nginx"), 0755); err != nil {
+		return err
+	}
+	if err := os.Symlink("/dev/stdout", filepath.Join(dir, "var", "log", "nginx", "access.log")); err != nil {
+		return err
+	}
 
 	cmd := exec.Command("tar", "-c", "-C", dir, ".")
 	cmd.Stdout = os.Stdout

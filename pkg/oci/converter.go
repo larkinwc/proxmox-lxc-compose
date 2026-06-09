@@ -151,6 +151,9 @@ func exportAndExtract(containerID, dest string) error {
 		return fmt.Errorf("failed to start tar extract: %w", err)
 	}
 	if err := export.Run(); err != nil {
+		// Reap the tar process we already started to avoid leaking it.
+		_ = untar.Process.Kill()
+		_ = untar.Wait()
 		return fmt.Errorf("failed to export container: %w", err)
 	}
 	if err := untar.Wait(); err != nil {
@@ -163,11 +166,17 @@ func exportAndExtract(containerID, dest string) error {
 // created from inside rootfs so paths are stored relative (./bin, ./etc, ...),
 // which is what Proxmox expects for a CT template.
 func packGzip(rootfs, outputPath string) error {
-	out, err := os.Create(outputPath)
+	// Write to a temp file first and rename on success so a failed pack never
+	// leaves a partial template that cache-existence checks would trust.
+	tmpPath := outputPath + ".tmp"
+	out, err := os.Create(tmpPath)
 	if err != nil {
 		return fmt.Errorf("failed to create output file: %w", err)
 	}
-	defer out.Close()
+	defer func() {
+		_ = out.Close()
+		_ = os.Remove(tmpPath) // no-op once renamed away
+	}()
 
 	// Use the system tar with gzip for correct sparse/xattr handling.
 	tarCmd := dockerExec("tar", "-cz", "-C", rootfs, ".")
@@ -175,6 +184,12 @@ func packGzip(rootfs, outputPath string) error {
 	tarCmd.Stderr = os.Stderr
 	if err := tarCmd.Run(); err != nil {
 		return fmt.Errorf("failed to pack template: %w", err)
+	}
+	if err := out.Close(); err != nil {
+		return fmt.Errorf("failed to finalize output file: %w", err)
+	}
+	if err := os.Rename(tmpPath, outputPath); err != nil {
+		return fmt.Errorf("failed to move packed template into place: %w", err)
 	}
 	return nil
 }

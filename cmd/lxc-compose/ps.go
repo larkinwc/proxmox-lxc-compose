@@ -17,9 +17,12 @@ func init() {
 			if err != nil {
 				return err
 			}
+			// The VMID store only supplies friendly names; if it's
+			// unreadable, still list containers from Proxmox.
 			store, err := newVMIDStore()
 			if err != nil {
-				return err
+				fmt.Fprintf(os.Stderr, "warning: failed to load VMID store: %v\n", err)
+				store = nil
 			}
 
 			containers, err := backend.List()
@@ -34,8 +37,10 @@ func init() {
 			fmt.Fprintln(w, "NAME\tVMID\tSTATE")
 			for _, c := range containers {
 				name := c.Name
-				if mapped, ok := store.Lookup(c.VMID); ok {
-					name = mapped
+				if store != nil {
+					if mapped, ok := store.Lookup(c.VMID); ok {
+						name = mapped
+					}
 				}
 				fmt.Fprintf(w, "%s\t%d\t%s\n", name, c.VMID, c.Status)
 			}
