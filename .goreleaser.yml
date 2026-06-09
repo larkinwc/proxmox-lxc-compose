@@ -1,9 +1,16 @@
+version: 2
+
+# Artifacts are named "lxc-compose" to match the installed command and the
+# `go install .../cmd/lxc-compose` path (the Go module is proxmox-lxc-compose).
+project_name: lxc-compose
+
 before:
   hooks:
     - go mod tidy
 
 builds:
-  - env:
+  - binary: lxc-compose
+    env:
       - CGO_ENABLED=0
     goos:
       - linux
@@ -25,7 +32,7 @@ builds:
       - -trimpath
 
 archives:
-  - format: tar.gz
+  - formats: [tar.gz]
     name_template: >-
       {{ .ProjectName }}_
       {{- title .Os }}_
@@ -35,10 +42,13 @@ archives:
       {{- if .Arm }}v{{ .Arm }}{{ end }}
     format_overrides:
       - goos: windows
-        format: zip
+        formats: [zip]
     files:
       - README.md
       - LICENSE*
+
+checksum:
+  name_template: 'checksums.txt'
 
 changelog:
   sort: asc

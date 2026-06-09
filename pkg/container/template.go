@@ -110,6 +110,32 @@ func (m *LXCManager) ListTemplates() ([]*Template, error) {
 	return templates, nil
 }
 
+// DeleteTemplate removes a template and its associated files
+func (m *LXCManager) DeleteTemplate(name string) error {
+	templatesDir := filepath.Join(m.configPath, "templates")
+	metadataPath := filepath.Join(templatesDir, name+".json")
+
+	if _, err := os.Stat(metadataPath); err != nil {
+		if os.IsNotExist(err) {
+			return fmt.Errorf("template %s does not exist", name)
+		}
+		return fmt.Errorf("failed to stat template: %w", err)
+	}
+
+	// Remove the copied container files (best effort if present)
+	templatePath := filepath.Join(templatesDir, name)
+	if err := os.RemoveAll(templatePath); err != nil {
+		return fmt.Errorf("failed to remove template files: %w", err)
+	}
+
+	// Remove the metadata file
+	if err := os.Remove(metadataPath); err != nil {
+		return fmt.Errorf("failed to remove template metadata: %w", err)
+	}
+
+	return nil
+}
+
 // saveTemplate saves a template to disk
 func (m *LXCManager) saveTemplate(template *Template) error {
 	templatesDir := filepath.Join(m.configPath, "templates")

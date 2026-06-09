@@ -1,0 +1,40 @@
+# Provision from an existing Proxmox CT template (a `:vztmpl/` volid). The image
+# is used as-is (no conversion). Download a template first with, e.g.:
+#
+#   pveam update && pveam available --section system | grep alpine
+#   pveam download local alpine-3.19-default_20240207_amd64.tar.xz
+#
+# Then adjust the volid below to match `pveam list local`.
+#
+#   lxc-compose -f examples/alpine-template.yml up
+#   lxc-compose -f examples/alpine-template.yml down --rm
+#
+# NOTE: only the fields below are translated to Proxmox. Compose `command:`,
+# `entrypoint:`, `environment:`, and port forwarding are NOT applied to
+# template-based containers (see README "Compose -> Proxmox field mapping").
+version: "1.0"
+services:
+  app:
+    image: local:vztmpl/alpine-3.19-default_20240207_amd64.tar.xz
+    cpu:
+      cores: 2
+      shares: 1024
+    memory:
+      limit: 512M
+      swap: 256M
+    storage:
+      pool: local-lvm
+      root: 4G
+      mounts:
+        - source: extra-data        # managed volume on the storage pool
+          target: /data
+    network:
+      interfaces:
+        - type: bridge
+          bridge: vmbr0
+          ip: 192.168.1.50/24
+          gateway: 192.168.1.1
+          dns:
+            - 1.1.1.1
+    security:
+      isolation: strict             # -> unprivileged container

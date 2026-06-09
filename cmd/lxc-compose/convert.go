@@ -3,6 +3,7 @@ package main
 import (
 	"fmt"
 	"path/filepath"
+	"strings"
 
 	"github.com/larkinwc/proxmox-lxc-compose/pkg/oci"
 
@@ -22,10 +23,18 @@ func init() {
 			}
 
 			fmt.Printf("Converting image '%s' to LXC template at '%s'...\n", imageName, outputPath)
-			if err := oci.ConvertOCIToLXC(imageName, outputPath); err != nil {
+			result, err := oci.ConvertOCIToLXC(imageName, outputPath)
+			if err != nil {
 				return fmt.Errorf("failed to convert image: %w", err)
 			}
-			fmt.Println("Conversion complete!")
+			fmt.Printf("Conversion complete: %s\n", result.OutputPath)
+			fmt.Printf("  distro: %s, log symlinks fixed: %d\n",
+				result.PostProcess.Distro, result.PostProcess.LogLinksFixed)
+			if result.InitWrapperPath != "" {
+				fmt.Printf("  init command: %s (runs: %s)\n",
+					result.InitWrapperPath,
+					strings.Join(append(append([]string{}, result.Entrypoint...), result.Command...), " "))
+			}
 			return nil
 		},
 	}
