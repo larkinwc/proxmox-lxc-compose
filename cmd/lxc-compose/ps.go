@@ -5,8 +5,6 @@ import (
 	"os"
 	"text/tabwriter"
 
-	"github.com/larkinwc/proxmox-lxc-compose/pkg/container"
-
 	"github.com/spf13/cobra"
 )
 
@@ -15,27 +13,38 @@ func init() {
 		Use:   "ps",
 		Short: "List containers",
 		RunE: func(_ *cobra.Command, _ []string) error {
-			// Create container manager
-			manager, err := container.NewLXCManager("/var/lib/lxc")
+			backend, err := newBackend()
 			if err != nil {
-				return fmt.Errorf("failed to create container manager: %w", err)
+				return err
+			}
+			// The VMID store only supplies friendly names; if it's
+			// unreadable, still list containers from Proxmox.
+			store, err := newVMIDStore()
+			if err != nil {
+				fmt.Fprintf(os.Stderr, "warning: failed to load VMID store: %v\n", err)
+				store = nil
 			}
 
-			// Get list of containers
-			containers, err := manager.List()
+			containers, err := backend.List()
 			if err != nil {
 				return fmt.Errorf("failed to list containers: %w", err)
 			}
 
-			// Create tabwriter for formatted output
+			// Create tabwriter for formatted output. Prefer the compose
+			// service name from the VMID store, falling back to the Proxmox
+			// container name.
 			w := tabwriter.NewWriter(os.Stdout, 0, 0, 3, ' ', 0)
-			fmt.Fprintln(w, "NAME\tSTATE")
+			fmt.Fprintln(w, "NAME\tVMID\tSTATE")
 			for _, c := range containers {
-				fmt.Fprintf(w, "%s\t%s\n", c.Name, c.State)
+				name := c.Name
+				if store != nil {
+					if mapped, ok := store.Lookup(c.VMID); ok {
+						name = mapped
+					}
+				}
+				fmt.Fprintf(w, "%s\t%d\t%s\n", name, c.VMID, c.Status)
 			}
-			w.Flush()
-
-			return nil
+			return w.Flush()
 		},
 	}
 

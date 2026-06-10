@@ -117,7 +117,6 @@ func Validate(container *Container) error {
 
 	// Validate security configuration
 	if container.Security != nil {
-		fmt.Printf("DEBUG: Validating security config: %+v\n", container.Security)
 		if err := validation.ValidateSecurityProfile(toValidationSecurityProfile(container.Security)); err != nil {
 			return fmt.Errorf("invalid security configuration: %w", err)
 		}

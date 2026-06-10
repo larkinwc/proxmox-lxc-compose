@@ -100,8 +100,18 @@ func TestLocalImageStore(t *testing.T) {
 			t.Error("expected error storing with invalid reference")
 		}
 
-		// Test storing in non-existent directory
-		badStore, _ := NewLocalImageStore("/nonexistent/path")
+		// Test storing where the store root is actually a file, so the
+		// image directory cannot be created. This is deterministic
+		// regardless of the user running the test (e.g. root).
+		filePath := filepath.Join(tmpDir, "not-a-dir")
+		if err := os.WriteFile(filePath, []byte("x"), 0644); err != nil {
+			t.Fatal(err)
+		}
+		badStore := &LocalImageStore{
+			rootDir: filePath,
+			cache:   make(map[string]*cachedImage),
+			ttl:     86400,
+		}
 		if err := badStore.Store(testRef, []byte{}); err == nil {
 			t.Error("expected error storing to invalid path")
 		}

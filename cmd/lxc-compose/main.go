@@ -16,6 +16,14 @@ var (
 	development bool
 )
 
+// Build information injected at release time via -ldflags. Defaults are used
+// for `go install` / source builds where these are not set.
+var (
+	version = "dev"
+	commit  = "none"
+	date    = "unknown"
+)
+
 func init() {
 	cobra.OnInitialize(initConfig)
 
@@ -62,6 +70,7 @@ var rootCmd = &cobra.Command{
 	Long: `lxc-compose is a CLI tool that allows you to manage LXC containers 
 using a docker-compose like syntax. It supports creating, starting, stopping, 
 and managing containers defined in a YAML configuration file.`,
+	Version: version,
 }
 
 func main() {

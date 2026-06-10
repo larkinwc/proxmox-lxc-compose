@@ -4,7 +4,6 @@ import (
 	"fmt"
 
 	"github.com/larkinwc/proxmox-lxc-compose/pkg/common"
-	"github.com/larkinwc/proxmox-lxc-compose/pkg/container"
 
 	"github.com/spf13/cobra"
 )
@@ -28,22 +27,21 @@ Use --rm to also remove the containers.`,
 
 func downCmdRunE(_ *cobra.Command, args []string) error {
 	// Load configuration
-	cfg, err := common.Load(configFile)
+	compose, err := common.Load(resolveConfigFile())
 	if err != nil {
 		return fmt.Errorf("failed to load config: %w", err)
 	}
-
-	// Convert to compose config type
-	var compose common.ComposeConfig
-	compose.Services = make(map[string]common.Container)
-	if cfg != nil {
-		compose.Services["default"] = cfg.Services["default"]
+	if compose == nil || len(compose.Services) == 0 {
+		return fmt.Errorf("no services defined in config")
 	}
 
-	// Create container manager
-	manager, err := container.NewLXCManager("/var/lib/lxc")
+	backend, err := newBackend()
 	if err != nil {
-		return fmt.Errorf("failed to create container manager: %w", err)
+		return err
+	}
+	store, err := newVMIDStore()
+	if err != nil {
+		return err
 	}
 
 	// Stop all or specified services
@@ -59,15 +57,23 @@ func downCmdRunE(_ *cobra.Command, args []string) error {
 			return fmt.Errorf("service '%s' not found in config", name)
 		}
 
-		fmt.Printf("Stopping container '%s'...\n", name)
-		if err := manager.Stop(name); err != nil {
+		vmid, ok := store.Get(name)
+		if !ok {
+			return fmt.Errorf("no VMID mapping found for service '%s' (was it started?)", name)
+		}
+
+		fmt.Printf("Shutting down container '%s' (VMID %d)...\n", name, vmid)
+		if err := backend.Shutdown(vmid); err != nil {
 			return fmt.Errorf("failed to stop container '%s': %w", name, err)
 		}
 
 		if removeContainers {
-			fmt.Printf("Removing container '%s'...\n", name)
-			if err := manager.Remove(name); err != nil {
+			fmt.Printf("Removing container '%s' (VMID %d)...\n", name, vmid)
+			if err := backend.Destroy(vmid); err != nil {
 				return fmt.Errorf("failed to remove container '%s': %w", name, err)
+			}
+			if err := store.Remove(name); err != nil {
+				return fmt.Errorf("failed to remove VMID mapping for '%s': %w", name, err)
 			}
 		}
 	}

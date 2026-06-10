@@ -1,4 +1,4 @@
-.PHONY: all build test lint clean
+.PHONY: all build install uninstall test lint clean
 
 # Go parameters
 GOCMD=go
@@ -6,11 +6,30 @@ GOBUILD=$(GOCMD) build
 GOTEST=$(GOCMD) test
 BINARY_NAME=lxc-compose
 MAIN_PATH=./cmd/lxc-compose
+PREFIX?=/usr/local
+
+# Embed build metadata so `lxc-compose version` is meaningful for source builds.
+VERSION?=$(shell git describe --tags --always --dirty 2>/dev/null || echo dev)
+COMMIT?=$(shell git rev-parse --short HEAD 2>/dev/null || echo none)
+DATE?=$(shell date -u +%Y-%m-%dT%H:%M:%SZ)
+LDFLAGS=-s -w \
+	-X main.version=$(VERSION) \
+	-X main.commit=$(COMMIT) \
+	-X main.date=$(DATE)
 
 all: lint test build
 
 build:
-	$(GOBUILD) -o $(BINARY_NAME) $(MAIN_PATH)
+	$(GOBUILD) -trimpath -ldflags '$(LDFLAGS)' -o $(BINARY_NAME) $(MAIN_PATH)
+
+# Install the built binary to $(PREFIX)/bin (default /usr/local/bin).
+install: build
+	install -d $(DESTDIR)$(PREFIX)/bin
+	install -m 0755 $(BINARY_NAME) $(DESTDIR)$(PREFIX)/bin/$(BINARY_NAME)
+	@echo "Installed $(BINARY_NAME) to $(DESTDIR)$(PREFIX)/bin"
+
+uninstall:
+	rm -f $(DESTDIR)$(PREFIX)/bin/$(BINARY_NAME)
 
 test:
 	$(GOTEST) -v -race -cover ./...

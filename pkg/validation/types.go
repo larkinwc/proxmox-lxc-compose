@@ -79,9 +79,6 @@ func ValidateSecurityProfile(cfg *SecurityProfile) error {
 
 // isValidCapability checks if a Linux capability is valid
 func isValidCapability(capability string) bool {
-	// Add debug output
-	fmt.Printf("DEBUG: Checking capability: %s\n", capability)
-
 	// First try exact match
 	if validCaps[capability] {
 		return true
@@ -90,14 +87,12 @@ func isValidCapability(capability string) bool {
 	// Try with CAP_ prefix if not present
 	if !strings.HasPrefix(capability, "CAP_") {
 		withPrefix := "CAP_" + capability
-		fmt.Printf("DEBUG: Checking with CAP_ prefix: %s\n", withPrefix)
 		return validCaps[withPrefix]
 	}
 
 	// Try without CAP_ prefix if present
 	if strings.HasPrefix(capability, "CAP_") {
 		withoutPrefix := strings.TrimPrefix(capability, "CAP_")
-		fmt.Printf("DEBUG: Checking without CAP_ prefix: %s\n", withoutPrefix)
 		return validCaps[withoutPrefix]
 	}
 
