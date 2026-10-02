@@ -141,4 +141,3 @@ func prepareTemplate(name, image string, force bool) (preparedTemplate, error) {
 		InitCmd:    result.InitWrapperPath,
 	}, nil
 }
-
