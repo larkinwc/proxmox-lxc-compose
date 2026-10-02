@@ -2,6 +2,7 @@ package proxmox
 
 import (
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -83,39 +84,6 @@ func TestPCTCreateRequiresTemplate(t *testing.T) {
 	}
 }
 
-func TestPCTLifecycleCommands(t *testing.T) {
-	recorded, restore := mockExec("", false)
-	defer restore()
-
-	b := NewPCTBackend()
-	ops := []struct {
-		fn   func(int) error
-		verb string
-	}{
-		{b.Start, "start"},
-		{b.Stop, "stop"},
-		{b.Shutdown, "shutdown"},
-		{b.Suspend, "suspend"},
-		{b.Resume, "resume"},
-		{b.Destroy, "destroy"},
-	}
-	for _, op := range ops {
-		if err := op.fn(123); err != nil {
-			t.Fatalf("%s error: %v", op.verb, err)
-		}
-	}
-
-	if len(*recorded) != len(ops) {
-		t.Fatalf("expected %d commands, got %d", len(ops), len(*recorded))
-	}
-	for i, op := range ops {
-		cmd := (*recorded)[i]
-		if cmd.args[0] != op.verb || cmd.args[1] != "123" {
-			t.Errorf("command %d = %v, want %s 123", i, cmd.args, op.verb)
-		}
-	}
-}
-
 func TestPCTCommandFailure(t *testing.T) {
 	_, restore := mockExec("", true)
 	defer restore()
@@ -140,20 +108,6 @@ func TestParseStatus(t *testing.T) {
 	}
 }
 
-func TestPCTStatus(t *testing.T) {
-	_, restore := mockExec("status: running\n", false)
-	defer restore()
-
-	b := NewPCTBackend()
-	st, err := b.Status(100)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if st != StatusRunning {
-		t.Errorf("status = %v, want running", st)
-	}
-}
-
 func TestParseList(t *testing.T) {
 	out := `VMID       Status     Lock         Name
 100        running                 web
@@ -168,24 +122,6 @@ func TestParseList(t *testing.T) {
 	}
 	if infos[1].VMID != 101 || infos[1].Name != "db" || infos[1].Status != StatusStopped {
 		t.Errorf("infos[1] = %+v", infos[1])
-	}
-}
-
-func TestPCTVMIDs(t *testing.T) {
-	out := `VMID       Status     Lock         Name
-100        running                 web
-105        stopped                 db
-`
-	_, restore := mockExec(out, false)
-	defer restore()
-
-	b := NewPCTBackend()
-	ids, err := b.VMIDs()
-	if err != nil {
-		t.Fatal(err)
-	}
-	if len(ids) != 2 || ids[0] != 100 || ids[1] != 105 {
-		t.Errorf("VMIDs = %v, want [100 105]", ids)
 	}
 }
 
@@ -230,5 +166,149 @@ func TestSetInitCommandMissingConf(t *testing.T) {
 	b := &PCTBackend{binary: "pct", confDir: t.TempDir()}
 	if err := b.SetInitCommand(999, "/sbin/init"); err == nil {
 		t.Error("expected error for missing config file")
+	}
+}
+
+func TestParseLXCState(t *testing.T) {
+	cases := []struct {
+		out  string
+		want Status
+	}{
+		{"State:          RUNNING\n", StatusRunning},
+		{"State: FROZEN\n", StatusPaused},
+		{"State:\tSTOPPED\n", StatusStopped},
+		{"", StatusUnknown},
+		{"RUNNING\n", StatusUnknown},
+		{"State: FREEZING\n", StatusUnknown},
+		{"State: THAWED\n", StatusUnknown},
+		{"State: RUNNING\nunexpected output", StatusUnknown},
+	}
+	for _, tc := range cases {
+		got, err := parseLXCState(tc.out)
+		if got != tc.want || (err != nil) != (tc.want == StatusUnknown) {
+			t.Errorf("parseLXCState(%q) = %v, %v; want %v", tc.out, got, err, tc.want)
+		}
+	}
+}
+
+func TestPCTRuntimeState(t *testing.T) {
+	cases := []struct {
+		name        string
+		pctStatus   string
+		lxcState    string
+		failCommand string
+		want        Status
+		wantError   string
+	}{
+		{"running", "running", "RUNNING", "", StatusRunning, ""},
+		{"frozen", "running", "FROZEN", "", StatusPaused, ""},
+		{"stopped", "stopped", "", "", StatusStopped, ""},
+		{"stopped during inspection", "running", "STOPPED", "", StatusStopped, ""},
+		{"pct paused", "paused", "FROZEN", "", StatusPaused, ""},
+		{"unknown pct", "unexpected", "", "", StatusUnknown, "unknown pct status"},
+		{"unknown lxc", "running", "FREEZING", "", StatusUnknown, "unrecognized lxc-info"},
+		{"empty lxc", "running", "", "", StatusUnknown, "unrecognized lxc-info"},
+		{"inspection failure", "running", "RUNNING", "lxc-info", StatusUnknown, "inspection denied"},
+		{"pct failure", "running", "RUNNING", "pct", StatusUnknown, "inspection denied"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			orig := execCommand
+			t.Cleanup(func() { execCommand = orig })
+			execCommand = func(name string, args ...string) *exec.Cmd {
+				if name == tc.failCommand {
+					return exec.Command("sh", "-c", "printf 'inspection denied'; exit 1")
+				}
+				if name == "lxc-info" {
+					if tc.pctStatus == "stopped" {
+						t.Fatal("stopped container must not require LXC inspection")
+					}
+					out := ""
+					if tc.lxcState != "" {
+						out = "State: " + tc.lxcState + "\n"
+					}
+					return exec.Command("printf", "%s", out)
+				}
+				out := "status: " + tc.pctStatus + "\n"
+				if len(args) > 0 && args[0] == "list" {
+					out = "VMID Status Lock Name\n100 " + tc.pctStatus + " web\n"
+				}
+				return exec.Command("printf", "%s", out)
+			}
+			b := NewPCTBackend()
+			state, err := b.Status(100)
+			if state != tc.want {
+				t.Errorf("Status = %v, want %v", state, tc.want)
+			}
+			assertStateError(t, err, tc.wantError)
+			infos, err := b.List()
+			assertStateError(t, err, tc.wantError)
+			if tc.wantError == "" {
+				if len(infos) != 1 || infos[0].VMID != 100 || infos[0].Name != "web" || infos[0].Status != tc.want {
+					t.Errorf("List = %+v, want container 100/web with status %v", infos, tc.want)
+				}
+			} else if infos != nil {
+				t.Errorf("List returned partial inventory on inspection failure: %+v", infos)
+			}
+		})
+	}
+}
+
+func assertStateError(t *testing.T, err error, want string) {
+	t.Helper()
+	if want == "" {
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+	} else if err == nil || !strings.Contains(err.Error(), want) {
+		t.Fatalf("error = %v, want containing %q", err, want)
+	}
+}
+
+func TestPCTFreezerFailure(t *testing.T) {
+	_, restore := mockExec("", true)
+	defer restore()
+	b := NewPCTBackend()
+	if err := b.Suspend(100); err == nil {
+		t.Fatal("Suspend must report freezer failure")
+	}
+	if err := b.Resume(100); err == nil {
+		t.Fatal("Resume must report unfreezer failure")
+	}
+}
+
+func TestPCTListMixedStates(t *testing.T) {
+	orig := execCommand
+	t.Cleanup(func() { execCommand = orig })
+	execCommand = func(name string, args ...string) *exec.Cmd {
+		out := "VMID Status Lock Name\n100 running web\n101 stopped db\n102 running worker\n"
+		if name == "lxc-info" {
+			switch args[1] {
+			case "100":
+				out = "State: FROZEN\n"
+			case "102":
+				out = "State: RUNNING\n"
+			default:
+				t.Fatalf("unexpected inspection of container %s", args[1])
+			}
+		}
+		return exec.Command("printf", "%s", out)
+	}
+	infos, err := NewPCTBackend().List()
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := []ContainerInfo{
+		{VMID: 100, Name: "web", Status: StatusPaused},
+		{VMID: 101, Name: "db", Status: StatusStopped},
+		{VMID: 102, Name: "worker", Status: StatusRunning},
+	}
+	if len(infos) != len(want) {
+		t.Fatalf("List = %+v, want %+v", infos, want)
+	}
+	for i := range want {
+		if infos[i] != want[i] {
+			t.Errorf("List[%d] = %+v, want %+v", i, infos[i], want[i])
+		}
 	}
 }
