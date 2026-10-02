@@ -83,7 +83,7 @@ func assertDeploymentRecord(t *testing.T, want deploymentRecord) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got := state.services["web"]; got != want {
+	if got := state.services["web"]; !reflect.DeepEqual(got, want) {
 		t.Fatalf("deployment state = %+v, want %+v", got, want)
 	}
 }
@@ -624,4 +624,63 @@ func TestCorruptVMIDMappingsAreRejectedBeforeDestruction(t *testing.T) {
 			})
 		}
 	}
+}
+
+func TestConfigDriftReportsSortedChangedFieldsWithoutSecrets(t *testing.T) {
+	fake, cleanup := setupBackendTest(t)
+	defer cleanup()
+	configFile = writeComposeFile(t, nginxCompose+"    environment: {TOKEN: secret-before}\n")
+	if err := upCmdRunE(nil, []string{"web"}); err != nil {
+		t.Fatal(err)
+	}
+	state, err := loadDeploymentState()
+	if err != nil {
+		t.Fatal(err)
+	}
+	record := state.services["web"]
+	configFile = writeComposeFile(t, nginxCompose+"    environment: {TOKEN: secret-after}\n    command: []\n    memory:\n      limit: 512M\n")
+	err = upCmdRunE(nil, []string{"web"})
+	want := "changed fields: command, effective node options, environment, memory"
+	if err == nil || !strings.Contains(err.Error(), want) || !strings.Contains(err.Error(), "--recreate") {
+		t.Fatalf("expected sorted field-level drift report, got %v", err)
+	}
+	if strings.Contains(err.Error(), "secret-before") || strings.Contains(err.Error(), "secret-after") {
+		t.Fatal("drift error disclosed environment values")
+	}
+	data, err := os.ReadFile(vmidStorePath + ".state.json")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(data), "secret-before") || strings.Contains(string(data), "secret-after") {
+		t.Fatal("deployment metadata persisted secret values instead of hashes")
+	}
+	if fake.status[record.VMID] != proxmox.StatusRunning {
+		t.Fatal("drift reporting modified existing CT")
+	}
+	assertDeploymentRecord(t, record)
+}
+
+func TestLegacyDigestWithoutFieldHashesDoesNotGuessDifferences(t *testing.T) {
+	fake, record := provisionWeb(t)
+	state, err := loadDeploymentState()
+	if err != nil {
+		t.Fatal(err)
+	}
+	record.Fields = nil
+	state.services["web"] = record
+	if err := state.save(); err != nil {
+		t.Fatal(err)
+	}
+	if err := upCmdRunE(nil, []string{"web"}); err != nil {
+		t.Fatalf("matching legacy digest should still be accepted: %v", err)
+	}
+	configFile = writeComposeFile(t, nginxCompose+"    memory:\n      limit: 512M\n")
+	err = upCmdRunE(nil, []string{"web"})
+	if err == nil || !strings.Contains(err.Error(), "field-level differences unavailable in legacy deployment state") || !strings.Contains(err.Error(), "--recreate") {
+		t.Fatalf("expected honest legacy difference report, got %v", err)
+	}
+	if fake.status[record.VMID] != proxmox.StatusRunning {
+		t.Fatal("legacy drift reporting modified existing CT")
+	}
+	assertDeploymentRecord(t, record)
 }

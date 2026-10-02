@@ -15,9 +15,10 @@ import (
 // deploymentState records only successfully provisioned services. VMIDs remain
 // in the existing mapping file so removing a missing CT never changes its ID.
 type deploymentRecord struct {
-	VMID     int    `json:"vmid"`
-	Digest   string `json:"digest"`
-	Hostname string `json:"hostname"`
+	VMID     int               `json:"vmid"`
+	Digest   string            `json:"digest"`
+	Hostname string            `json:"hostname"`
+	Fields   map[string]string `json:"fields,omitempty"`
 }
 
 type deploymentState struct {
@@ -74,7 +75,7 @@ func (s *deploymentState) remove(name string) error {
 // JSON sorts map keys; retaining the entire accepted service model ensures even
 // fields not currently translated by pct cannot silently change on repeat up.
 // The translated options capture only node defaults effective for this service.
-func desiredConfigDigest(svc common.Container, opts proxmox.CreateOptions) (string, error) {
+func desiredConfigDigest(svc common.Container, opts proxmox.CreateOptions) (string, map[string]string, error) {
 	data, err := json.Marshal(struct {
 		Service       common.Container
 		Options       proxmox.CreateOptions
@@ -82,9 +83,41 @@ func desiredConfigDigest(svc common.Container, opts proxmox.CreateOptions) (stri
 		EntrypointSet bool
 	}{svc, opts, svc.Command != nil, svc.Entrypoint != nil})
 	if err != nil {
-		return "", err
+		return "", nil, err
 	}
-	return fmt.Sprintf("%x", sha256.Sum256(data)), nil
+	var canonical struct {
+		Service map[string]json.RawMessage
+		Options json.RawMessage
+	}
+	if err := json.Unmarshal(data, &canonical); err != nil {
+		return "", nil, err
+	}
+	// omitempty hides explicit empty lists, whose runtime meaning is "clear"
+	// rather than "inherit". Hash their actual representations separately.
+	canonical.Service["command"], _ = json.Marshal(svc.Command)
+	canonical.Service["entrypoint"], _ = json.Marshal(svc.Entrypoint)
+	fields := make(map[string]string, len(canonical.Service)+1)
+	for name, value := range canonical.Service {
+		fields[name] = fmt.Sprintf("%x", sha256.Sum256(value))
+	}
+	fields["effective node options"] = fmt.Sprintf("%x", sha256.Sum256(canonical.Options))
+	return fmt.Sprintf("%x", sha256.Sum256(data)), fields, nil
+}
+
+func changedDesiredFields(previous, desired map[string]string) []string {
+	changed := make([]string, 0)
+	for name, digest := range previous {
+		if desired[name] != digest {
+			changed = append(changed, name)
+		}
+	}
+	for name := range desired {
+		if _, existed := previous[name]; !existed {
+			changed = append(changed, name)
+		}
+	}
+	sort.Strings(changed)
+	return changed
 }
 
 func selectedServices(compose *common.ComposeConfig, args []string) ([]string, error) {

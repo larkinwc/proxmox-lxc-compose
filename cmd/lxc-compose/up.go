@@ -2,6 +2,7 @@ package main
 
 import (
 	"fmt"
+	"strings"
 
 	"github.com/larkinwc/proxmox-lxc-compose/pkg/common"
 	"github.com/larkinwc/proxmox-lxc-compose/pkg/proxmox"
@@ -84,6 +85,7 @@ func upCmdRunE(cmd *cobra.Command, args []string) error {
 		name     string
 		vmid     int
 		digest   string
+		fields   map[string]string
 		opts     proxmox.CreateOptions
 		template preparedTemplate
 		exists   bool
@@ -98,7 +100,7 @@ func upCmdRunE(cmd *cobra.Command, args []string) error {
 		if err != nil {
 			return fmt.Errorf("failed to translate config for '%s': %w", name, err)
 		}
-		digest, err := desiredConfigDigest(svc, opts)
+		digest, fields, err := desiredConfigDigest(svc, opts)
 		if err != nil {
 			return fmt.Errorf("failed to fingerprint config for '%s': %w", name, err)
 		}
@@ -122,13 +124,17 @@ func upCmdRunE(cmd *cobra.Command, args []string) error {
 				return fmt.Errorf("service '%s' VMID mapping differs from recorded deployment; refusing to modify container", name)
 			}
 			if record.Digest != digest {
-				return fmt.Errorf("desired configuration for service '%s' changed; use --recreate", name)
+				difference := "field-level differences unavailable in legacy deployment state"
+				if len(record.Fields) > 0 {
+					difference = "changed fields: " + strings.Join(changedDesiredFields(record.Fields, fields), ", ")
+				}
+				return fmt.Errorf("desired configuration for service '%s' changed (%s); use --recreate", name, difference)
 			}
 		}
 		if exists && info.Status != proxmox.StatusRunning && info.Status != proxmox.StatusStopped && info.Status != proxmox.StatusPaused {
 			return fmt.Errorf("container '%s' (VMID %d) has unknown status %q; refusing to modify it", name, vmid, info.Status)
 		}
-		plans = append(plans, servicePlan{name: name, vmid: vmid, digest: digest, opts: opts, exists: exists, status: info.Status})
+		plans = append(plans, servicePlan{name: name, vmid: vmid, digest: digest, fields: fields, opts: opts, exists: exists, status: info.Status})
 	}
 	// Template resolution and translation must succeed before recreation can
 	// stop or destroy an existing service, including multi-service requests.
@@ -227,7 +233,7 @@ func upCmdRunE(cmd *cobra.Command, args []string) error {
 		if err := backend.Start(vmid); err != nil {
 			return fmt.Errorf("failed to start container '%s': %w", name, err)
 		}
-		state.services[name] = deploymentRecord{VMID: vmid, Digest: plan.digest, Hostname: plan.opts.Hostname}
+		state.services[name] = deploymentRecord{VMID: vmid, Digest: plan.digest, Hostname: plan.opts.Hostname, Fields: plan.fields}
 		if err := state.save(); err != nil {
 			return fmt.Errorf("failed to save deployment state for '%s': %w", name, err)
 		}
