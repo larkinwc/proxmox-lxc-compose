@@ -13,7 +13,7 @@ type Status string
 const (
 	StatusRunning Status = "running"
 	StatusStopped Status = "stopped"
-	// StatusPaused maps to Proxmox's frozen/suspended state.
+	// StatusPaused means guest processes are frozen in memory.
 	StatusPaused  Status = "paused"
 	StatusUnknown Status = "unknown"
 )
@@ -36,9 +36,9 @@ type Backend interface {
 	Stop(vmid int) error
 	// Shutdown gracefully shuts down a container.
 	Shutdown(vmid int) error
-	// Suspend pauses (freezes) a running container.
+	// Suspend freezes guest processes in memory, without checkpointing.
 	Suspend(vmid int) error
-	// Resume unfreezes a suspended container.
+	// Resume unfreezes guest processes without restoring a checkpoint.
 	Resume(vmid int) error
 	// Destroy removes a container and its disks.
 	Destroy(vmid int) error

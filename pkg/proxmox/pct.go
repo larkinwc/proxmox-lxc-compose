@@ -32,11 +32,15 @@ func NewPCTBackend() *PCTBackend {
 
 // run executes a pct subcommand and returns combined output.
 func (b *PCTBackend) run(args ...string) ([]byte, error) {
-	cmd := execCommand(b.binary, args...)
+	return runCommand(b.binary, args...)
+}
+
+func runCommand(binary string, args ...string) ([]byte, error) {
+	cmd := execCommand(binary, args...)
 	out, err := cmd.CombinedOutput()
 	if err != nil {
-		return out, fmt.Errorf("pct %s failed: %w: %s",
-			strings.Join(args, " "), err, strings.TrimSpace(string(out)))
+		return out, fmt.Errorf("%s %s failed: %w: %s",
+			binary, strings.Join(args, " "), err, strings.TrimSpace(string(out)))
 	}
 	return out, nil
 }
@@ -139,15 +143,15 @@ func (b *PCTBackend) Shutdown(vmid int) error {
 	return err
 }
 
-// Suspend pauses a running container.
+// Suspend freezes guest processes in memory, without CRIU checkpointing.
 func (b *PCTBackend) Suspend(vmid int) error {
-	_, err := b.run("suspend", strconv.Itoa(vmid))
+	_, err := runCommand("lxc-freeze", "-n", strconv.Itoa(vmid))
 	return err
 }
 
-// Resume unfreezes a suspended container.
+// Resume unfreezes guest processes without restoring a checkpoint.
 func (b *PCTBackend) Resume(vmid int) error {
-	_, err := b.run("resume", strconv.Itoa(vmid))
+	_, err := runCommand("lxc-unfreeze", "-n", strconv.Itoa(vmid))
 	return err
 }
 
@@ -202,13 +206,49 @@ func (b *PCTBackend) SetInitCommand(vmid int, initPath string) error {
 	return nil
 }
 
-// Status returns the runtime status of a container by parsing `pct status`.
+// Status combines pct's inventory status with LXC's actual freezer state.
 func (b *PCTBackend) Status(vmid int) (Status, error) {
 	out, err := b.run("status", strconv.Itoa(vmid))
 	if err != nil {
 		return StatusUnknown, err
 	}
-	return parseStatus(string(out)), nil
+	return b.runtimeStatus(vmid, parseStatus(string(out)))
+}
+
+// pct reports frozen containers as running, so inspect LXC for active guests.
+// Stopped guests need no LXC inspection (and may have no runtime config).
+func (b *PCTBackend) runtimeStatus(vmid int, status Status) (Status, error) {
+	switch status {
+	case StatusStopped:
+		return StatusStopped, nil
+	case StatusRunning, StatusPaused:
+		out, err := runCommand("lxc-info", "-n", strconv.Itoa(vmid), "-s")
+		if err != nil {
+			return StatusUnknown, err
+		}
+		state, err := parseLXCState(string(out))
+		if err != nil {
+			return StatusUnknown, fmt.Errorf("container %d: %w", vmid, err)
+		}
+		return state, nil
+	default:
+		return StatusUnknown, fmt.Errorf("container %d: unknown pct status", vmid)
+	}
+}
+
+func parseLXCState(out string) (Status, error) {
+	line := strings.TrimSpace(out)
+	if strings.HasPrefix(line, "State:") {
+		switch strings.TrimSpace(strings.TrimPrefix(line, "State:")) {
+		case "RUNNING":
+			return StatusRunning, nil
+		case "STOPPED":
+			return StatusStopped, nil
+		case "FROZEN":
+			return StatusPaused, nil
+		}
+	}
+	return StatusUnknown, fmt.Errorf("unrecognized lxc-info state %q", line)
 }
 
 // parseStatus interprets the output of `pct status <vmid>` ("status: running").
@@ -228,13 +268,21 @@ func parseStatus(out string) Status {
 	}
 }
 
-// List returns all containers by parsing `pct list`.
+// List combines pct's container inventory with LXC's actual freezer states.
 func (b *PCTBackend) List() ([]ContainerInfo, error) {
 	out, err := b.run("list")
 	if err != nil {
 		return nil, err
 	}
-	return parseList(string(out)), nil
+	infos := parseList(string(out))
+	for i := range infos {
+		status, err := b.runtimeStatus(infos[i].VMID, infos[i].Status)
+		if err != nil {
+			return nil, err
+		}
+		infos[i].Status = status
+	}
+	return infos, nil
 }
 
 // parseList parses the columnar output of `pct list`:

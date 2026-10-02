@@ -133,10 +133,10 @@ Other notes:
 - Must run on the Proxmox node (the `pct` backend is local-only).
 - Real-node behavior is covered by integration tests gated behind the
   `integration` build tag and `PROXMOX_INTEGRATION=1` (see below).
-- `pause` / `unpause` use Proxmox's experimental `pct suspend` / `pct resume`
-  checkpoint operations, not an in-memory freezer. Checkpointing may fail on
-  otherwise working containers. On Proxmox VE 9.2.10, the Debian 13 smoke
-  container started successfully but `pct suspend` failed in `lxc-checkpoint`.
+- `pause` / `unpause` freeze and thaw guest processes in memory using
+  `lxc-freeze` / `lxc-unfreeze`; they do not use CRIU or save checkpoints.
+  `ps` inspects `lxc-info` to distinguish frozen guests from running ones.
+  These LXC utilities must be available on the Proxmox node.
 
 ## Installation
 
@@ -454,11 +454,11 @@ require sudo.
 A disposable Debian 13 container passed `up`, `ps`, guest execution, and
 `down --rm`; its configuration matched 1 core, 256 MB RAM, 128 MB swap, a
 2 GB `local-lvm` rootfs, `vmbr0`, and unprivileged isolation. Teardown removed
-the container and its VMID mapping. The existing
-`TestIntegrationContainerLifecycle` also passed on the node using the Go 1.23.0
-compiled test binary. `pause` failed in Proxmox checkpointing; CRIU reported
-`Can't dump nested uts namespace` (see Limitations). OCI conversion was not
-exercised on this node because Docker was not installed.
+the container and its VMID mapping. `TestIntegrationContainerLifecycle` passed
+on the node using the Go 1.23.0 compiled test binary, including freezer
+transitions: a guest counter stopped changing while paused and resumed afterward,
+with the same guest init PID. OCI conversion was not exercised in this initial
+release-readiness smoke because Docker was not installed.
 
 ## Contributing
 
