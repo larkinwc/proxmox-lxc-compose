@@ -16,12 +16,10 @@ var dockerExec = exec.Command
 type ConvertResult struct {
 	// OutputPath is the gzip-compressed LXC template tarball.
 	OutputPath string
-	// Entrypoint and Command are the image's declared process, captured so the
-	// caller can reproduce it under LXC (e.g. via an init command).
-	Entrypoint []string
-	Command    []string
-	// InitWrapperPath is the in-container path of the generated init wrapper
-	// (empty if the image declared no command).
+	// Runtime records the effective configuration, including image env and cwd.
+	Runtime RuntimeConfig
+	// InitWrapperPath is the actual generated guest init path, empty when the
+	// effective runtime needs no wrapper and boots distro init directly.
 	InitWrapperPath string
 	// PostProcess summarizes the rootfs compatibility fixes applied.
 	PostProcess PostProcessResult
@@ -32,31 +30,45 @@ type imageInspect struct {
 	Config struct {
 		Entrypoint []string `json:"Entrypoint"`
 		Cmd        []string `json:"Cmd"`
+		Env        []string `json:"Env"`
+		WorkingDir string   `json:"WorkingDir"`
 	} `json:"Config"`
 }
 
-// inspectImage returns the entrypoint and command declared by an image.
-func inspectImage(image string) (entrypoint, cmd []string, err error) {
+// inspectImage returns the image's default process, environment and directory.
+func inspectImage(image string) (RuntimeConfig, error) {
 	out, err := dockerExec("docker", "inspect", image).Output()
 	if err != nil {
-		return nil, nil, fmt.Errorf("failed to inspect image %q: %w", image, err)
+		return RuntimeConfig{}, fmt.Errorf("failed to inspect image %q: %w", image, err)
 	}
 	var inspects []imageInspect
 	if err := json.Unmarshal(out, &inspects); err != nil {
-		return nil, nil, fmt.Errorf("failed to parse docker inspect output: %w", err)
+		return RuntimeConfig{}, fmt.Errorf("failed to parse docker inspect output: %w", err)
 	}
 	if len(inspects) == 0 {
-		return nil, nil, fmt.Errorf("docker inspect returned no entries for %q", image)
+		return RuntimeConfig{}, fmt.Errorf("docker inspect returned no entries for %q", image)
 	}
-	return inspects[0].Config.Entrypoint, inspects[0].Config.Cmd, nil
+	config := inspects[0].Config
+	runtime := RuntimeConfig{Entrypoint: config.Entrypoint, Command: config.Cmd, WorkingDir: config.WorkingDir, Environment: map[string]string{}}
+	for _, variable := range config.Env {
+		key, value, ok := strings.Cut(variable, "=")
+		if !ok {
+			return RuntimeConfig{}, fmt.Errorf("invalid image environment entry %q", variable)
+		}
+		runtime.Environment[key] = value
+	}
+	if err := validateRuntime(runtime, nil); err != nil {
+		return RuntimeConfig{}, err
+	}
+	return runtime, nil
 }
 
-// ConvertOCIToLXC converts an OCI image into a Proxmox-compatible, gzip
-// compressed LXC template. It pulls the image, exports its filesystem, applies
-// OCI->LXC compatibility fixes (log symlinks, networking, init wrapper), and
-// repacks the result. The image's entrypoint/command are captured in the
-// returned ConvertResult so callers can reproduce the runtime under LXC.
-func ConvertOCIToLXC(imageName, outputPath string) (*ConvertResult, error) {
+// ConvertOCIToLXC converts an image and its effective runtime into a gzip LXC
+// template. Overrides are validated before pulling or writing to the host.
+func ConvertOCIToLXC(imageName, outputPath string, overrides RuntimeOverrides) (*ConvertResult, error) {
+	if err := overrides.Validate(); err != nil {
+		return nil, err
+	}
 	if _, err := exec.LookPath("docker"); err != nil {
 		return nil, fmt.Errorf("docker is not installed: %w", err)
 	}
@@ -78,8 +90,12 @@ func ConvertOCIToLXC(imageName, outputPath string) (*ConvertResult, error) {
 		return nil, fmt.Errorf("failed to pull image %q: %w", imageName, err)
 	}
 
-	// Capture the image's declared entrypoint/command.
-	entrypoint, cmd, err := inspectImage(imageName)
+	// Capture and resolve image defaults before creating the rootfs.
+	defaults, err := inspectImage(imageName)
+	if err != nil {
+		return nil, err
+	}
+	runtime, err := ResolveRuntime(defaults, overrides)
 	if err != nil {
 		return nil, err
 	}
@@ -115,7 +131,7 @@ func ConvertOCIToLXC(imageName, outputPath string) (*ConvertResult, error) {
 	}
 
 	// Apply OCI->LXC compatibility fixes.
-	post, err := PostProcessRootfs(rootfs, entrypoint, cmd)
+	post, err := PostProcessRootfs(rootfs, runtime)
 	if err != nil {
 		return nil, fmt.Errorf("failed to post-process rootfs: %w", err)
 	}
@@ -127,37 +143,33 @@ func ConvertOCIToLXC(imageName, outputPath string) (*ConvertResult, error) {
 
 	return &ConvertResult{
 		OutputPath:      outputPath,
-		Entrypoint:      entrypoint,
-		Command:         cmd,
+		Runtime:         runtime,
 		InitWrapperPath: post.InitWrapperPath,
 		PostProcess:     post,
 	}, nil
 }
 
-// exportAndExtract pipes `docker export <id>` into `tar -x` rooted at dest.
+// exportAndExtract confines even adversarial exported archive paths to dest.
 func exportAndExtract(containerID, dest string) error {
 	export := dockerExec("docker", "export", containerID)
-	untar := dockerExec("tar", "-x", "-C", dest)
-
 	pipe, err := export.StdoutPipe()
 	if err != nil {
-		return fmt.Errorf("failed to pipe docker export: %w", err)
+		return fmt.Errorf("pipe docker export: %w", err)
 	}
-	untar.Stdin = pipe
 	export.Stderr = os.Stderr
-	untar.Stderr = os.Stderr
-
-	if err := untar.Start(); err != nil {
-		return fmt.Errorf("failed to start tar extract: %w", err)
+	if err := export.Start(); err != nil {
+		return fmt.Errorf("start docker export: %w", err)
 	}
-	if err := export.Run(); err != nil {
-		// Reap the tar process we already started to avoid leaking it.
-		_ = untar.Process.Kill()
-		_ = untar.Wait()
-		return fmt.Errorf("failed to export container: %w", err)
+	err = extractTar(pipe, dest)
+	if err != nil {
+		_ = export.Process.Kill()
 	}
-	if err := untar.Wait(); err != nil {
-		return fmt.Errorf("failed to extract container filesystem: %w", err)
+	waitErr := export.Wait()
+	if err != nil {
+		return fmt.Errorf("extract container filesystem: %w", err)
+	}
+	if waitErr != nil {
+		return fmt.Errorf("export container: %w", waitErr)
 	}
 	return nil
 }
@@ -168,11 +180,13 @@ func exportAndExtract(containerID, dest string) error {
 func packGzip(rootfs, outputPath string) error {
 	// Write to a temp file first and rename on success so a failed pack never
 	// leaves a partial template that cache-existence checks would trust.
-	tmpPath := outputPath + ".tmp"
-	out, err := os.Create(tmpPath)
+	// Generated archives contain runtime environment values and must remain
+	// owner-readable only. CreateTemp also avoids following a stale .tmp link.
+	out, err := os.CreateTemp(filepath.Dir(outputPath), ".lxc-compose-template-")
 	if err != nil {
 		return fmt.Errorf("failed to create output file: %w", err)
 	}
+	tmpPath := out.Name()
 	defer func() {
 		_ = out.Close()
 		_ = os.Remove(tmpPath) // no-op once renamed away

@@ -1,17 +1,16 @@
 # Provision from an existing Proxmox CT template (a `:vztmpl/` volid). The image
-# is used as-is (no conversion). Download a template first with, e.g.:
+# is used as-is unless runtime overrides require a derived template. Download one:
 #
 #   pveam update && pveam available --section system | grep alpine
 #   pveam download local alpine-3.19-default_20240207_amd64.tar.xz
 #
 # Then adjust the volid below to match `pveam list local`.
 #
-#   lxc-compose -f examples/alpine-template.yml up
-#   lxc-compose -f examples/alpine-template.yml down --rm
+#   lxc-compose up -f examples/alpine-template.yml
+#   lxc-compose down -f examples/alpine-template.yml --rm
 #
-# NOTE: only the fields below are translated to Proxmox. Compose `command:`,
-# `entrypoint:`, `environment:`, and port forwarding are NOT applied to
-# template-based containers (see README "Compose -> Proxmox field mapping").
+# `command`/`entrypoint` arrays replace distro init; environment-only overrides
+# preserve native init and reach systemd services. Port forwarding is not applied.
 version: "1.0"
 services:
   app:

@@ -23,7 +23,7 @@ func init() {
 			}
 
 			fmt.Printf("Converting image '%s' to LXC template at '%s'...\n", imageName, outputPath)
-			result, err := oci.ConvertOCIToLXC(imageName, outputPath)
+			result, err := oci.ConvertOCIToLXC(imageName, outputPath, oci.RuntimeOverrides{})
 			if err != nil {
 				return fmt.Errorf("failed to convert image: %w", err)
 			}
@@ -33,7 +33,7 @@ func init() {
 			if result.InitWrapperPath != "" {
 				fmt.Printf("  init command: %s (runs: %s)\n",
 					result.InitWrapperPath,
-					strings.Join(append(append([]string{}, result.Entrypoint...), result.Command...), " "))
+					strings.Join(append(append([]string{}, result.Runtime.Entrypoint...), result.Runtime.Command...), " "))
 			}
 			return nil
 		},

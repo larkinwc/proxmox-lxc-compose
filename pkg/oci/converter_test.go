@@ -1,10 +1,11 @@
 package oci
 
 import (
+	"encoding/json"
 	"os"
 	"os/exec"
 	"path/filepath"
-	"strings"
+	"reflect"
 	"testing"
 )
 
@@ -16,23 +17,24 @@ func TestInspectImageParsing(t *testing.T) {
 		return helperCommand(t, "inspect-ok", args...)
 	}
 
-	entrypoint, cmd, err := inspectImage("nginx:alpine")
+	runtime, err := inspectImage("nginx:alpine")
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(entrypoint) != 1 || entrypoint[0] != "/docker-entrypoint.sh" {
-		t.Errorf("entrypoint = %v", entrypoint)
+	runtime.Network = []RuntimeNetwork{}
+	root := t.TempDir()
+	wrapper, err := WriteInitWrapper(root, runtime)
+	if err != nil {
+		t.Fatal(err)
 	}
-	want := []string{"nginx", "-g", "daemon off;"}
-	if strings.Join(cmd, "\x00") != strings.Join(want, "\x00") {
-		t.Errorf("cmd = %v, want %v", cmd, want)
+	capture := captureWrapper(t, root, wrapper)
+	if !reflect.DeepEqual(capture.Args, []string{"image default", "it's quoted"}) || capture.Env["A"] != "image env" || capture.Cwd != "/" {
+		t.Fatalf("inspected image runtime = %#v", capture)
 	}
 }
 
-// TestConvertOCIToLXCFlow exercises the full conversion orchestration with a
-// mocked docker + tar so it runs without Docker or a Proxmox node. It verifies
-// the output is renamed to .tar.gz, the rootfs is post-processed, and the
-// captured command becomes an init wrapper.
+// The docker fixture provides real archive bytes; the converted template is
+// extracted and its generated shell wrapper executes a real consumer process.
 func TestConvertOCIToLXCFlow(t *testing.T) {
 	if _, err := exec.LookPath("docker"); err != nil {
 		t.Skip("docker not in PATH; LookPath guard would fail before mock")
@@ -63,24 +65,21 @@ func TestConvertOCIToLXCFlow(t *testing.T) {
 	}
 
 	out := filepath.Join(t.TempDir(), "nginx") // no extension on purpose
-	res, err := ConvertOCIToLXC("nginx:alpine", out)
+	res, err := ConvertOCIToLXC("nginx:alpine", out, RuntimeOverrides{Command: []string{"override arg"}, Environment: map[string]string{"A": "service env"}})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !strings.HasSuffix(res.OutputPath, ".tar.gz") {
-		t.Errorf("output not renamed to .tar.gz: %q", res.OutputPath)
+	root := t.TempDir()
+	if err := extractArchive(res.OutputPath, root); err != nil {
+		t.Fatal(err)
 	}
-	if _, err := os.Stat(res.OutputPath); err != nil {
-		t.Errorf("output file missing: %v", err)
+	capture := captureWrapper(t, root, res.InitWrapperPath)
+	if !reflect.DeepEqual(capture.Args, []string{"override arg"}) || capture.Env["A"] != "service env" || capture.Cwd != "/" {
+		t.Fatalf("converted runtime = %#v", capture)
 	}
-	if res.InitWrapperPath != InitWrapperPath {
-		t.Errorf("init wrapper = %q", res.InitWrapperPath)
-	}
-	if res.PostProcess.Distro != "alpine" {
-		t.Errorf("distro = %q", res.PostProcess.Distro)
-	}
-	if res.PostProcess.LogLinksFixed != 1 {
-		t.Errorf("log links fixed = %d, want 1", res.PostProcess.LogLinksFixed)
+	data, err := os.ReadFile(filepath.Join(root, "var", "log", "nginx", "access.log"))
+	if err != nil || len(data) != 0 {
+		t.Fatalf("converted access log: %q, %v", data, err)
 	}
 }
 
@@ -116,7 +115,15 @@ func TestHelperProcess(_ *testing.T) {
 	case "noop":
 		os.Exit(0)
 	case "inspect-ok":
-		os.Stdout.WriteString(`[{"Config":{"Entrypoint":["/docker-entrypoint.sh"],"Cmd":["nginx","-g","daemon off;"]}}]`)
+		data, err := json.Marshal([]interface{}{map[string]interface{}{"Config": map[string]interface{}{
+			"Entrypoint": []string{os.Args[0], "-test.run=TestRuntimeCapture", "--"},
+			"Cmd":        []string{"image default", "it's quoted"},
+			"Env":        []string{"A=image env", "B=image b"}, "WorkingDir": "/",
+		}}})
+		if err != nil {
+			os.Exit(1)
+		}
+		_, _ = os.Stdout.Write(data)
 		os.Exit(0)
 	case "create-ok":
 		os.Stdout.WriteString("deadbeefcafe\n")

@@ -1,7 +1,6 @@
 package main
 
 import (
-	"fmt"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -80,8 +79,8 @@ var ociConvertFn = oci.ConvertOCIToLXC
 type preparedTemplate struct {
 	// OSTemplate is the volid to pass to pct (e.g. local:vztmpl/foo.tar.gz).
 	OSTemplate string
-	// InitCmd is the in-container init command captured from an OCI image
-	// (empty when using a standard CT template).
+	// InitCmd is the generated guest runtime wrapper, empty when the service
+	// boots distro init directly.
 	InitCmd string
 }
 
@@ -92,52 +91,4 @@ type preparedTemplate struct {
 // never do.
 func isProxmoxVolid(image string) bool {
 	return strings.Contains(image, ":vztmpl/")
-}
-
-// ociTemplatePath returns the cache path for a converted OCI image.
-func ociTemplatePath(image string) string {
-	safe := strings.NewReplacer("/", "_", ":", "-").Replace(image)
-	return filepath.Join(templateCacheDir, fmt.Sprintf("oci-%s.tar.gz", safe))
-}
-
-// prepareTemplate resolves a service's image into a pct-usable template,
-// auto-detecting intent from the image reference:
-//
-//   - A Proxmox template volid (contains ":vztmpl/") is used verbatim.
-//   - Any other reference is treated as an OCI image and converted into the
-//     local template cache. Conversion is cached: an existing converted
-//     template is reused unless `force` is set.
-//
-// An empty image leaves OSTemplate unset so Translate can derive a best-effort
-// volid (and pct will fail clearly if it doesn't exist).
-func prepareTemplate(name, image string, force bool) (preparedTemplate, error) {
-	if image == "" {
-		return preparedTemplate{}, nil
-	}
-	if isProxmoxVolid(image) {
-		return preparedTemplate{OSTemplate: image}, nil
-	}
-
-	outPath := ociTemplatePath(image)
-	volid := "local:vztmpl/" + filepath.Base(outPath)
-
-	// Reuse a previously converted template unless a refresh was requested.
-	// The init wrapper is baked into the cached rootfs at a deterministic path.
-	if !force {
-		if _, err := os.Stat(outPath); err == nil {
-			fmt.Printf("Using cached template for image '%s' (service '%s')\n", image, name)
-			return preparedTemplate{OSTemplate: volid, InitCmd: oci.InitWrapperPath}, nil
-		}
-	}
-
-	fmt.Printf("Converting OCI image '%s' for service '%s'...\n", image, name)
-	result, err := ociConvertFn(image, outPath)
-	if err != nil {
-		return preparedTemplate{}, fmt.Errorf("failed to convert image %q: %w", image, err)
-	}
-
-	return preparedTemplate{
-		OSTemplate: "local:vztmpl/" + filepath.Base(result.OutputPath),
-		InitCmd:    result.InitWrapperPath,
-	}, nil
 }
