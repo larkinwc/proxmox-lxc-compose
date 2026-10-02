@@ -29,10 +29,11 @@ auto-allocated VMIDs, and OCI images are converted to LXC templates on demand.
 
 ## Prerequisites
 
-- Go 1.23 or later
-- A Proxmox VE node (the `up`/`down`/`ps`/`pause`/`unpause` commands invoke the
-  `pct` CLI and must run **on** the node as root)
-- Docker (for OCI image conversion)
+- A Proxmox VE node (the `up`/`down`/`ps`/`pause`/`unpause` commands must run
+  **on** the node as root)
+- Docker only when converting OCI images; existing Proxmox templates do not
+  require Docker
+- Go 1.23 or later only when building from source, not for binary installation
 
 ## Proxmox Integration
 
@@ -104,6 +105,10 @@ Other notes:
 - Must run on the Proxmox node (the `pct` backend is local-only).
 - Real-node behavior is covered by integration tests gated behind the
   `integration` build tag and `PROXMOX_INTEGRATION=1` (see below).
+- `pause` / `unpause` use Proxmox's experimental `pct suspend` / `pct resume`
+  checkpoint operations, not an in-memory freezer. Checkpointing may fail on
+  otherwise working containers. On Proxmox VE 9.2.10, the Debian 13 smoke
+  container started successfully but `pct suspend` failed in `lxc-checkpoint`.
 
 ## Installation
 
@@ -112,8 +117,9 @@ toolchain, so the recommended path is the prebuilt binary.
 
 ### Quick install (recommended)
 
-Downloads the latest release for your OS/arch and installs it to
-`/usr/local/bin` (needs only `curl` and `tar`):
+Downloads the latest release for your OS/arch, requires a matching SHA-256
+checksum, and installs to `/usr/local/bin`. Requires `curl` or `wget`, `tar`,
+`install`, and `sha256sum` or `shasum` (available on a stock Proxmox node).
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/larkinwc/proxmox-lxc-compose/main/install.sh | sh
@@ -156,6 +162,12 @@ sudo make install          # or: make build && sudo mv lxc-compose /usr/local/bi
 ```bash
 lxc-compose version
 ```
+
+> **Release cutover:** older releases through v1.0.6 contain a
+> `proxmox-lxc-compose` binary and differently named archives/checksums. This
+> installer targets the new `lxc-compose` release layout and requires a new
+> release published with the configuration in this checkout. It cannot install
+> v1.0.6; do not use the quick-install command until the new release is published.
 
 ## Configuration
 
@@ -356,7 +368,7 @@ services:
 
 ### Prerequisites
 
-- Go 1.23.4 or higher
+- Go 1.23 or higher (including the Go 1.23.0 toolchain)
 - Access to Proxmox system
 - Docker (for image conversion)
 
@@ -376,6 +388,49 @@ PROXMOX_INTEGRATION=1 \
   PROXMOX_TEST_STORAGE=local-lvm PROXMOX_TEST_VMID=999 \
   go test -tags integration ./pkg/proxmox/ -run Integration -v
 ```
+
+### Binary releases
+
+GoReleaser v2 builds static, CGO-free binaries for Linux and macOS
+(amd64/arm64) and Windows (amd64). Archives contain `lxc-compose` (or
+`lxc-compose.exe`), README, and LICENSE; `checksums.txt` lists SHA-256 hashes.
+The binary's `version` command includes the release version, commit, and date.
+
+Validate and build locally without publishing:
+
+```bash
+make release-check
+make release-dry-run
+```
+
+Artifacts are written to `dist/`. CI also builds snapshot artifacts for pushes
+and pull requests. The tag-triggered release workflow runs tests, then publishes
+with the repository's built-in `GITHUB_TOKEN` (`contents: write`); no custom
+`RELEASE_TOKEN` secret is required. Both workflows use the Go version in `go.mod`.
+
+To publish, commit and push the desired changes, then push a new `v*` tag.
+Check the [existing releases](https://github.com/larkinwc/proxmox-lxc-compose/releases)
+first: the cutover release must be newer than v1.0.6. The `release-major`,
+`release-minor`, and `release-patch` Make targets push tags immediately and
+calculate from local tags, so do not use them with a stale local tag set.
+
+### Real-node smoke verification
+
+The Linux amd64 snapshot and installer were exercised on Proxmox VE 9.2.10
+using staged release artifacts (not a published GitHub release). Installer
+checks rejected missing checksums, missing archive entries in the checksum
+manifest, checksum mismatches, and corrupt archives without replacing the
+existing binary. Installing into a new user-writable directory does not
+require sudo.
+
+A disposable Debian 13 container passed `up`, `ps`, guest execution, and
+`down --rm`; its configuration matched 1 core, 256 MB RAM, 128 MB swap, a
+2 GB `local-lvm` rootfs, `vmbr0`, and unprivileged isolation. Teardown removed
+the container and its VMID mapping. The existing
+`TestIntegrationContainerLifecycle` also passed on the node using the Go 1.23.0
+compiled test binary. `pause` failed in Proxmox checkpointing; CRIU reported
+`Can't dump nested uts namespace` (see Limitations). OCI conversion was not
+exercised on this node because Docker was not installed.
 
 ## Contributing
 

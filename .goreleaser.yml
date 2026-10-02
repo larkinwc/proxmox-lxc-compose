@@ -4,10 +4,6 @@ version: 2
 # `go install .../cmd/lxc-compose` path (the Go module is proxmox-lxc-compose).
 project_name: lxc-compose
 
-before:
-  hooks:
-    - go mod tidy
-
 builds:
   - binary: lxc-compose
     env:
