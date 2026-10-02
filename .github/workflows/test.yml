@@ -17,7 +17,7 @@ jobs:
     - name: Set up Go
       uses: actions/setup-go@v5
       with:
-        go-version: '1.21'
+        go-version-file: go.mod
         cache: true
     
     - name: Verify Docker
@@ -25,14 +25,11 @@ jobs:
         docker --version
         docker info
 
-    - name: Install golangci-lint
+    - name: Run golangci-lint
       uses: golangci/golangci-lint-action@v4
       with:
-        version: latest
+        version: v1.64.8
         args: --timeout=5m
-
-    - name: Run golangci-lint
-      run: golangci-lint run ./...
 
     - name: Run tests with coverage
       run: |
@@ -44,3 +41,22 @@ jobs:
         file: ./coverage.txt
         flags: unittests
         name: codecov-umbrella 
+
+  release-smoke:
+    name: Build release artifacts
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+      - uses: goreleaser/goreleaser-action@v6
+        with:
+          distribution: goreleaser
+          version: '~> v2'
+          args: release --snapshot --clean

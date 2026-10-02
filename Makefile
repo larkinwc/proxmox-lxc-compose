@@ -106,7 +106,7 @@ version:
 
 # Dry run a release to test configuration
 release-dry-run:
-	goreleaser release --snapshot --clean --skip-publish
+	goreleaser release --snapshot --clean
 
 # Check release configuration
 release-check:
