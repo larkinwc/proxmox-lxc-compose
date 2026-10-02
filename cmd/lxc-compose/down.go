@@ -4,6 +4,7 @@ import (
 	"fmt"
 
 	"github.com/larkinwc/proxmox-lxc-compose/pkg/common"
+	"github.com/larkinwc/proxmox-lxc-compose/pkg/proxmox"
 
 	"github.com/spf13/cobra"
 )
