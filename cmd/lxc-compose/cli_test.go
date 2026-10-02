@@ -33,6 +33,7 @@ func setupBackendTest(t *testing.T) (*fakeBackend, func()) {
 	origConfigFile := configFile
 	origConvertFn := ociConvertFn
 	origCacheDir := templateCacheDir
+	origReadiness := templateReadinessFn
 
 	proxmoxBackendFactory = func() (proxmox.Backend, error) { return fake, nil }
 	vmidStorePath = filepath.Join(t.TempDir(), "vmids.json")
@@ -41,6 +42,7 @@ func setupBackendTest(t *testing.T) (*fakeBackend, func()) {
 	// a temp dir and stub the converter so `up` never shells out or writes to
 	// /var/lib/vz (which fails for non-root CI).
 	templateCacheDir = t.TempDir()
+	templateReadinessFn = func(string) error { return nil }
 	ociConvertFn = func(_, outPath string) (*oci.ConvertResult, error) {
 		if err := os.WriteFile(outPath, []byte("fake-template"), 0644); err != nil {
 			return nil, err
@@ -54,6 +56,7 @@ func setupBackendTest(t *testing.T) (*fakeBackend, func()) {
 		configFile = origConfigFile
 		ociConvertFn = origConvertFn
 		templateCacheDir = origCacheDir
+		templateReadinessFn = origReadiness
 	}
 	return fake, cleanup
 }
@@ -216,6 +219,13 @@ func TestDownRemoveDestroysAndUnmaps(t *testing.T) {
 	store, _ := newVMIDStore()
 	if _, ok := store.Get("web"); ok {
 		t.Error("expected web mapping to be removed")
+	}
+	state, err := loadDeploymentState()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := state.services["web"]; ok {
+		t.Error("expected web desired state to be removed")
 	}
 }
 
@@ -387,6 +397,7 @@ func upCmdForTest() *cobra.Command {
 	cmd := &cobra.Command{Use: "up"}
 	cmd.Flags().Bool("force-convert", false, "")
 	cmd.Flags().Bool("pull", false, "")
+	cmd.Flags().Bool("recreate", false, "")
 	return cmd
 }
 

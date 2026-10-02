@@ -50,6 +50,34 @@ at 100) and the `name -> vmid` mapping is persisted to
 `~/.lxc-compose/vmids.json`. Subsequent commands (`down`, `pause`, `ps`, ...)
 reuse that mapping so a service always maps to the same container.
 
+### Repeatable lifecycle and recreation
+
+`up` records the successfully applied service configuration and effective node
+defaults in `~/.lxc-compose/vmids.json.state.json`. Repeating it leaves a matching
+running container unchanged, starts a matching stopped container, and leaves a
+paused container paused. If the mapped container is missing, it is provisioned
+again at the same VMID.
+
+Changing a service or an effective node default requires explicit recreation:
+
+```bash
+lxc-compose up --recreate app
+lxc-compose up --pull --recreate app
+```
+
+Recreation stops and destroys the selected container, including its managed
+disks, then provisions its replacement at the same VMID. Back up data first.
+Selected configurations and template availability are checked before stopping
+existing containers; a hostname or VMID ownership mismatch is rejected.
+Mappings created by older versions have no recorded desired configuration and
+also require `--recreate`; they are never silently adopted. `down --rm` removes
+both the mapping and desired-state record.
+
+The Proxmox smoke covered legacy mapping refusal, repeated `up`, starting a
+stopped container, refusing changed memory without recreation, explicit
+replacement, refresh flag refusal, recovery of an externally removed container,
+and teardown.
+
 ### Node defaults
 
 Some Proxmox concepts have no compose-file equivalent and are supplied via
@@ -207,8 +235,8 @@ lxc-compose ps
 # View container logs
 lxc-compose logs [container_name]
 
-# Refresh OCI images (re-convert) on up
-lxc-compose up --pull
+# Refresh OCI images and explicitly replace existing containers
+lxc-compose up --pull --recreate
 
 # OCI image registry helpers
 lxc-compose images pull [registry/repository:tag]
