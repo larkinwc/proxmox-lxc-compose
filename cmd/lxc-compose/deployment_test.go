@@ -96,7 +96,7 @@ func TestRepeatUpRetainsRunningAndPausedContainers(t *testing.T) {
 			fake.initCmds[record.VMID] = "existing-init"
 			guard := &guardedLifecycleBackend{fakeBackend: fake, blockCreate: true, blockStart: true, blockStop: true, blockDestroy: true}
 			proxmoxBackendFactory = func() (proxmox.Backend, error) { return guard, nil }
-			ociConvertFn = func(string, string) (*oci.ConvertResult, error) {
+			ociConvertFn = func(string, string, oci.RuntimeOverrides) (*oci.ConvertResult, error) {
 				return nil, fmt.Errorf("repeat up must not resolve image again")
 			}
 			if err := upCmdRunE(nil, []string{"web"}); err != nil {
@@ -290,7 +290,9 @@ func TestRecreateValidationFailurePreservesExistingDeployment(t *testing.T) {
 				if err := cmd.Flags().Set("pull", "true"); err != nil {
 					t.Fatal(err)
 				}
-				ociConvertFn = func(string, string) (*oci.ConvertResult, error) { return nil, fmt.Errorf("template unavailable") }
+				ociConvertFn = func(string, string, oci.RuntimeOverrides) (*oci.ConvertResult, error) {
+					return nil, fmt.Errorf("template unavailable")
+				}
 			case "stop":
 				guard.blockStop = true
 			case "destroy":
@@ -432,7 +434,9 @@ func TestAllRecreationConfigsValidatedBeforeFirstContainerStopped(t *testing.T) 
 func TestAllRecreationTemplatesPreparedBeforeFirstContainerStopped(t *testing.T) {
 	fake, record := provisionWeb(t)
 	configFile = writeComposeFile(t, nginxCompose+"  db:\n    image: unavailable:image\n")
-	ociConvertFn = func(string, string) (*oci.ConvertResult, error) { return nil, fmt.Errorf("template unavailable") }
+	ociConvertFn = func(string, string, oci.RuntimeOverrides) (*oci.ConvertResult, error) {
+		return nil, fmt.Errorf("template unavailable")
+	}
 	if err := upCmdRunE(recreationCommand(t), []string{"web", "db"}); err == nil {
 		t.Fatal("expected later service template error")
 	}

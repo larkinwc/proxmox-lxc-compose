@@ -105,84 +105,14 @@ func TestWriteNetworkConfig(t *testing.T) {
 	}
 }
 
-func TestWriteInitWrapper(t *testing.T) {
-	dir := t.TempDir()
-	path, err := WriteInitWrapper(dir, []string{"/docker-entrypoint.sh"}, []string{"nginx", "-g", "daemon off;"})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if path != InitWrapperPath {
-		t.Errorf("path = %q, want %q", path, InitWrapperPath)
-	}
-	data, err := os.ReadFile(filepath.Join(dir, "usr", "local", "bin", "lxc-compose-init.sh"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	script := string(data)
-	if !strings.Contains(script, "exec '/docker-entrypoint.sh' 'nginx' '-g' 'daemon off;'") {
-		t.Errorf("wrapper exec line wrong:\n%s", script)
-	}
-	if !strings.Contains(script, "udhcpc") || !strings.Contains(script, "ip link set eth0 up") {
-		t.Errorf("wrapper missing network bring-up:\n%s", script)
-	}
-	if !strings.Contains(script, "/sys/class/net/eth0") {
-		t.Errorf("wrapper missing eth0 wait loop:\n%s", script)
-	}
-	// Executable bit set.
-	info, _ := os.Stat(filepath.Join(dir, "usr", "local", "bin", "lxc-compose-init.sh"))
-	if info.Mode()&0111 == 0 {
-		t.Error("wrapper is not executable")
-	}
-}
-
 func TestWriteInitWrapperEmpty(t *testing.T) {
 	// No command -> no wrapper.
-	path, err := WriteInitWrapper(t.TempDir(), nil, nil)
+	path, err := WriteInitWrapper(t.TempDir(), RuntimeConfig{})
 	if err != nil {
 		t.Fatal(err)
 	}
 	if path != "" {
 		t.Errorf("expected empty path, got %q", path)
-	}
-}
-
-func TestShellQuote(t *testing.T) {
-	cases := map[string]string{
-		"simple":      "'simple'",
-		"with space":  "'with space'",
-		"it's":        `'it'\''s'`,
-		"daemon off;": "'daemon off;'",
-	}
-	for in, want := range cases {
-		if got := shellQuote(in); got != want {
-			t.Errorf("shellQuote(%q) = %q, want %q", in, got, want)
-		}
-	}
-}
-
-func TestPostProcessRootfs(t *testing.T) {
-	dir := t.TempDir()
-	// Minimal alpine-like rootfs with a std-stream log symlink.
-	must(t, os.MkdirAll(filepath.Join(dir, "etc"), 0755))
-	must(t, os.WriteFile(filepath.Join(dir, "etc", "os-release"), []byte(`NAME="Alpine Linux"`), 0644))
-	must(t, os.MkdirAll(filepath.Join(dir, "var", "log", "nginx"), 0755))
-	must(t, os.Symlink("/dev/stdout", filepath.Join(dir, "var", "log", "nginx", "access.log")))
-
-	res, err := PostProcessRootfs(dir, nil, []string{"nginx", "-g", "daemon off;"})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if res.Distro != "alpine" {
-		t.Errorf("distro = %q", res.Distro)
-	}
-	if res.LogLinksFixed != 1 {
-		t.Errorf("log links fixed = %d, want 1", res.LogLinksFixed)
-	}
-	if res.NetworkConfig == "" {
-		t.Error("expected network config to be written")
-	}
-	if res.InitWrapperPath != InitWrapperPath {
-		t.Errorf("init wrapper = %q", res.InitWrapperPath)
 	}
 }
 

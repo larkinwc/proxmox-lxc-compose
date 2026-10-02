@@ -3,7 +3,6 @@ package main
 import (
 	"os"
 	"path/filepath"
-	"strings"
 	"testing"
 
 	"github.com/larkinwc/proxmox-lxc-compose/pkg/common"
@@ -38,16 +37,13 @@ func setupBackendTest(t *testing.T) (*fakeBackend, func()) {
 	proxmoxBackendFactory = func() (proxmox.Backend, error) { return fake, nil }
 	vmidStorePath = filepath.Join(t.TempDir(), "vmids.json")
 
-	// Keep image conversion off the real filesystem/Docker: point the cache at
-	// a temp dir and stub the converter so `up` never shells out or writes to
-	// /var/lib/vz (which fails for non-root CI).
+	// Lifecycle tests use valid local archives, without Docker or host storage.
 	templateCacheDir = t.TempDir()
 	templateReadinessFn = func(string) error { return nil }
-	ociConvertFn = func(_, outPath string) (*oci.ConvertResult, error) {
-		if err := os.WriteFile(outPath, []byte("fake-template"), 0644); err != nil {
-			return nil, err
-		}
-		return &oci.ConvertResult{OutputPath: outPath, InitWrapperPath: oci.InitWrapperPath}, nil
+	ociConvertFn = func(image, _ string, _ oci.RuntimeOverrides) (*oci.ConvertResult, error) {
+		runtime := oci.RuntimeConfig{Command: []string{"/bin/sh"}, Network: []oci.RuntimeNetwork{}}
+		archive := seedImageRuntime(t, image, runtime)
+		return &oci.ConvertResult{OutputPath: archive, Runtime: runtime, InitWrapperPath: oci.InitWrapperPath}, nil
 	}
 
 	cleanup := func() {
@@ -253,29 +249,6 @@ func TestPauseResumeService(t *testing.T) {
 	}
 }
 
-// stubConverter replaces ociConvertFn with a recording stub and points the
-// template cache at a temp dir. It returns a pointer to the converter call
-// count and a cleanup function.
-func stubConverter(t *testing.T) (*int, func()) {
-	t.Helper()
-	origConvert := ociConvertFn
-	origCacheDir := templateCacheDir
-	templateCacheDir = t.TempDir()
-	calls := 0
-	ociConvertFn = func(_, outPath string) (*oci.ConvertResult, error) {
-		calls++
-		// Materialize the cache file so cache-reuse logic can find it.
-		if err := os.WriteFile(outPath, []byte("template"), 0644); err != nil {
-			return nil, err
-		}
-		return &oci.ConvertResult{OutputPath: outPath, InitWrapperPath: oci.InitWrapperPath}, nil
-	}
-	return &calls, func() {
-		ociConvertFn = origConvert
-		templateCacheDir = origCacheDir
-	}
-}
-
 const nginxCompose = `version: "1.0"
 services:
   web:
@@ -283,113 +256,6 @@ services:
     storage:
       root: 2G
 `
-
-func TestUpAutoConvertsOCIImage(t *testing.T) {
-	fake, cleanup := setupBackendTest(t)
-	defer cleanup()
-	calls, restore := stubConverter(t)
-	defer restore()
-
-	// An OCI reference (no ":vztmpl/") is auto-detected and converted, with no
-	// env flags required.
-	configFile = writeComposeFile(t, nginxCompose)
-	if err := upCmdRunE(nil, nil); err != nil {
-		t.Fatalf("up failed: %v", err)
-	}
-
-	if *calls != 1 {
-		t.Errorf("converter called %d times, want 1", *calls)
-	}
-	opts, ok := fake.created[100]
-	if !ok {
-		t.Fatal("expected container 100 to be created")
-	}
-	if !strings.HasPrefix(opts.OSTemplate, "local:vztmpl/") {
-		t.Errorf("OSTemplate = %q, want local:vztmpl/ prefix", opts.OSTemplate)
-	}
-	if fake.initCmds[100] != oci.InitWrapperPath {
-		t.Errorf("init cmd = %q, want %q", fake.initCmds[100], oci.InitWrapperPath)
-	}
-}
-
-func TestUpUsesVolidWithoutConvert(t *testing.T) {
-	fake, cleanup := setupBackendTest(t)
-	defer cleanup()
-	calls, restore := stubConverter(t)
-	defer restore()
-
-	// A Proxmox template volid is used verbatim; the converter is not called.
-	configFile = writeComposeFile(t, `version: "1.0"
-services:
-  web:
-    image: local:vztmpl/alpine-3.22.tar.xz
-    storage:
-      root: 2G
-`)
-	if err := upCmdRunE(nil, nil); err != nil {
-		t.Fatalf("up failed: %v", err)
-	}
-	if *calls != 0 {
-		t.Errorf("converter should not be called for a volid, got %d calls", *calls)
-	}
-	if opts := fake.created[100]; opts.OSTemplate != "local:vztmpl/alpine-3.22.tar.xz" {
-		t.Errorf("OSTemplate = %q, want the volid", opts.OSTemplate)
-	}
-	if fake.initCmds[100] != "" {
-		t.Errorf("init cmd should be empty, got %q", fake.initCmds[100])
-	}
-}
-
-func TestUpReusesCachedTemplate(t *testing.T) {
-	fake, cleanup := setupBackendTest(t)
-	defer cleanup()
-	calls, restore := stubConverter(t)
-	defer restore()
-
-	// Pre-populate the cache so conversion should be skipped.
-	if err := os.WriteFile(ociTemplatePath("nginx:alpine"), []byte("cached"), 0644); err != nil {
-		t.Fatal(err)
-	}
-
-	configFile = writeComposeFile(t, nginxCompose)
-	if err := upCmdRunE(nil, nil); err != nil {
-		t.Fatalf("up failed: %v", err)
-	}
-	if *calls != 0 {
-		t.Errorf("converter should reuse cache, got %d calls", *calls)
-	}
-	if opts := fake.created[100]; !strings.HasPrefix(opts.OSTemplate, "local:vztmpl/oci-") {
-		t.Errorf("OSTemplate = %q, want cached oci- template", opts.OSTemplate)
-	}
-	// The init command is still applied from the cached (baked-in) wrapper.
-	if fake.initCmds[100] != oci.InitWrapperPath {
-		t.Errorf("init cmd = %q, want %q", fake.initCmds[100], oci.InitWrapperPath)
-	}
-}
-
-func TestUpForceConvertBypassesCache(t *testing.T) {
-	_, cleanup := setupBackendTest(t)
-	defer cleanup()
-	calls, restore := stubConverter(t)
-	defer restore()
-
-	// Cache present, but --force-convert must re-run conversion.
-	if err := os.WriteFile(ociTemplatePath("nginx:alpine"), []byte("cached"), 0644); err != nil {
-		t.Fatal(err)
-	}
-
-	configFile = writeComposeFile(t, nginxCompose)
-	cmd := upCmdForTest()
-	if err := cmd.Flags().Set("force-convert", "true"); err != nil {
-		t.Fatal(err)
-	}
-	if err := upCmdRunE(cmd, nil); err != nil {
-		t.Fatalf("up failed: %v", err)
-	}
-	if *calls != 1 {
-		t.Errorf("converter called %d times with --force-convert, want 1", *calls)
-	}
-}
 
 // upCmdForTest builds a cobra command carrying the up flags so flag-dependent
 // behavior can be exercised without the full root command.

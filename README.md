@@ -14,8 +14,9 @@ auto-allocated VMIDs, and OCI images are converted to LXC templates on demand.
   through the Proxmox `pct` CLI.
 - **Automatic VMID allocation** with a persisted service→VMID mapping.
 - **OCI image support**: any `image:` that isn't a Proxmox template volid is
-  auto-converted to an LXC template on `up` (cached, refreshable). The image's
-  entrypoint/command is reproduced under LXC.
+  auto-converted to an LXC template on `up` (cached, refreshable). Image process
+  defaults can be overridden per service without changing the shared image cache.
+  Template services also support command, entrypoint, and environment overrides.
 - **Resource / storage / network translation**: CPU, memory, rootfs, extra
   mounts, and bridged networking (DHCP or static) map to `pct` options.
 - **OCI registry helpers** (`images pull/push/list/remove`) with local caching,
@@ -115,16 +116,56 @@ These fields are translated to `pct` options on `up`:
 If a service declares no network, it gets a DHCP `eth0` on the default bridge
 (like docker-compose).
 
+### Command, entrypoint, and environment
+
+`command` and `entrypoint` are argument arrays; no implicit shell is added.
+For OCI images, omitted arrays inherit image defaults, while `[]` explicitly
+clears that array. An explicit `entrypoint` also clears the image's default
+command unless `command` is supplied. Image environment and working directory
+are retained.
+
+Environment precedence is **image → `env` → `environment`**. An empty value
+overrides the image value; an empty map does not clear inherited variables.
+Values are quoted literally, including spaces, quotes, shell metacharacters,
+and newlines.
+
+```yaml
+services:
+  web:
+    image: nginx:alpine
+    command: ["nginx", "-g", "daemon off;"]
+    environment:
+      NGINX_ENTRYPOINT_QUIET_LOGS: "1"
+```
+
+For native templates, a command/entrypoint override replaces distro init as
+PID 1. With environment-only overrides, the wrapper still executes `/sbin/init`.
+Systemd-based templates also receive a `DefaultEnvironment` drop-in so the
+variables reach actual system services; inspecting `/proc/1/environ` is not a
+reliable check because systemd sanitizes its own environment.
+
+Overrides produce separate content-addressed templates; the original template
+and shared OCI image archive are not modified. Cached archives and JSON metadata
+contain environment values and are owner-only. Generated guest runtime files
+are also owner-only. Existing metadata-less caches are rebuilt rather than
+guessing an init command. Template derivation uses `tar`, plus `xz` or `zstd`
+for those source compression formats.
+
+The wrapper brings up loopback and the configured interface names, and honors
+static addresses/gateways. It requests DHCP only for DHCP interfaces; without
+network configuration, it uses DHCP `eth0` on the default bridge.
+
+Changing runtime overrides is configuration drift: use `up --recreate` to apply
+them to an existing container, with the same disk-destruction warning described
+above.
+
+
 ### Limitations
 
 The parser accepts these fields, but `up` does **not** yet apply them to
 Proxmox containers:
 
-- `command` / `entrypoint` — only an **OCI-converted image's own** entrypoint is
-  reproduced (via `lxc.init.cmd`); a `command:` on a template-based service is
-  ignored.
-- `environment` / `env`, `ports` / `network.port_forwards` (no port forwarding),
-  `devices`.
+- `ports` / `network.port_forwards` (no port forwarding), `devices`.
 - `security.apparmor_profile`, `selinux_context`, `seccomp_profile`, and
   individual Linux `capabilities`.
 
@@ -305,7 +346,7 @@ services:
   web:
     image: nginx:alpine          # OCI image -> auto-converted
   base:
-    image: local:vztmpl/alpine-3.22.tar.xz   # template volid -> used directly
+    image: local:vztmpl/alpine-3.22.tar.xz   # template volid; no derivation without overrides
 ```
 
 ```bash
@@ -316,7 +357,7 @@ Conversion is **cached**: an already-converted image is reused on
 subsequent `up` runs. To refresh against an updated upstream image:
 
 ```bash
-lxc-compose up --pull           # or: lxc-compose up --force-convert
+lxc-compose up --pull --recreate # existing containers require explicit recreation
 ```
 
 Like docker-compose, every service receives a DHCP `eth0` on the default
@@ -417,6 +458,12 @@ PROXMOX_INTEGRATION=1 \
   go test -tags integration ./pkg/proxmox/ -run Integration -v
 ```
 
+To exercise native systemd service environment propagation, additionally set
+`PROXMOX_TEST_SYSTEMD_TEMPLATE` to a Debian/systemd template volid. This test
+refuses to replace an existing VMID and cleans up its derived template and guest.
+`PROXMOX_TEST_VMID` must always identify a dedicated disposable guest.
+
+
 ### Binary releases
 
 GoReleaser v2 builds static, CGO-free binaries for Linux and macOS
@@ -457,8 +504,25 @@ A disposable Debian 13 container passed `up`, `ps`, guest execution, and
 the container and its VMID mapping. `TestIntegrationContainerLifecycle` passed
 on the node using the Go 1.23.0 compiled test binary, including freezer
 transitions: a guest counter stopped changing while paused and resumed afterward,
-with the same guest init PID. OCI conversion was not exercised in this initial
-release-readiness smoke because Docker was not installed.
+with the same guest init PID.
+
+Further live-node checks covered repeated `up` without replacement, starting a
+stopped container, recreating a missing mapped container at the same VMID,
+sorted drift-field reporting, explicit recreation, and refusal to destroy a
+running container when its replacement template is unavailable.
+
+Native-template command overrides preserved literal environment values and
+configured a named static interface. CLI `pause`/`ps`/`up`/`unpause` preserved
+frozen state until explicit resume. A real systemd unit inherited environment
+values containing quotes, percent specifiers, backslashes, tabs, and newlines;
+`TestIntegrationSystemdEnvironment` passed on a disposable Debian 13 container.
+
+OCI nginx conversion was then exercised using an isolated Docker daemon. A
+service command override captured its inherited environment before starting
+nginx, proving image defaults and canonical environment precedence without
+relying on nginx's overwritten process-title/environment memory. Guest
+loopback HTTP returned 200, repeated `up` left the guest unchanged, generated
+cache files were owner-only, and `down --rm` removed the guest and mapping.
 
 ## Contributing
 

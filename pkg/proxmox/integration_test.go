@@ -7,11 +7,13 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"testing"
 	"time"
 
+	"github.com/larkinwc/proxmox-lxc-compose/pkg/oci"
 	"github.com/larkinwc/proxmox-lxc-compose/pkg/proxmox"
 )
 
@@ -233,4 +235,92 @@ func assertIntegrationState(t *testing.T, b proxmox.Backend, vmid int, want prox
 		}
 	}
 	t.Fatalf("container %d absent from List", vmid)
+}
+
+// Systemd does not inherit arbitrary PID 1 environment variables into units.
+// Exercise a real unit rather than inspecting wrapper text or /proc/1/environ.
+func TestIntegrationSystemdEnvironment(t *testing.T) {
+	requireIntegration(t)
+	template := os.Getenv("PROXMOX_TEST_SYSTEMD_TEMPLATE")
+	if template == "" {
+		t.Skip("set PROXMOX_TEST_SYSTEMD_TEMPLATE to a systemd-based vztmpl volid")
+	}
+	b := proxmox.NewPCTBackend()
+	vmid := testVMID(t)
+	inventory, err := b.List()
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, container := range inventory {
+		if container.VMID == vmid {
+			t.Fatalf("refusing to replace existing VMID %d", vmid)
+		}
+	}
+	source, err := exec.Command("pvesm", "path", template).Output()
+	if err != nil {
+		t.Fatal(err)
+	}
+	sourcePath := strings.TrimSpace(string(source))
+	if !filepath.IsAbs(sourcePath) || strings.ContainsAny(sourcePath, "\r\n") {
+		t.Fatalf("invalid template path %q", sourcePath)
+	}
+	file, err := os.CreateTemp(filepath.Dir(sourcePath), "lxc-compose-environment-*.tar.gz")
+	if err != nil {
+		t.Fatal(err)
+	}
+	output := file.Name()
+	if err := file.Close(); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = os.Remove(output) })
+	proof := "space ' quote \" double %n %% \\ backslash\nline\t$(touch /tmp/lxc-compose-env-injected)"
+	result, err := oci.ConvertTemplateRuntime(sourcePath, output, oci.RuntimeConfig{
+		Environment: map[string]string{"LXC_COMPOSE_ENV_PROOF": proof},
+		Network:     []oci.RuntimeNetwork{},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	storage := os.Getenv("PROXMOX_TEST_STORAGE")
+	if storage == "" {
+		storage = "local-lvm"
+	}
+	if err := b.Create(vmid, proxmox.CreateOptions{
+		Hostname: "lxc-compose-env-it", OSTemplate: "local:vztmpl/" + filepath.Base(output),
+		Storage: storage, RootFSSize: 2, MemoryMB: 256, Unprivileged: true,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		_ = b.Stop(vmid)
+		if err := b.Destroy(vmid); err != nil {
+			t.Errorf("remove disposable VMID %d: %v", vmid, err)
+		}
+	})
+	if err := b.SetInitCommand(vmid, result.InitWrapperPath); err != nil {
+		t.Fatal(err)
+	}
+	if err := b.Start(vmid); err != nil {
+		t.Fatal(err)
+	}
+	var actual []byte
+	deadline := time.Now().Add(30 * time.Second)
+	for time.Now().Before(deadline) {
+		actual, err = exec.Command("pct", "exec", strconv.Itoa(vmid), "--",
+			"systemd-run", "--wait", "--pipe", "/usr/bin/printenv", "LXC_COMPOSE_ENV_PROOF").Output()
+		if err == nil {
+			break
+		}
+		time.Sleep(250 * time.Millisecond)
+	}
+	if err != nil {
+		t.Fatalf("execute systemd unit: %v", err)
+	}
+	if string(actual) != proof+"\n" {
+		t.Fatalf("service environment = %q, want %q", actual, proof+"\n")
+	}
+	if out, err := exec.Command("pct", "exec", strconv.Itoa(vmid), "--",
+		"test", "!", "-e", "/tmp/lxc-compose-env-injected").CombinedOutput(); err != nil {
+		t.Fatalf("environment executed as shell input: %v: %s", err, out)
+	}
 }

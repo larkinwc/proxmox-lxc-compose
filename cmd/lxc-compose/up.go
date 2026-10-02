@@ -144,7 +144,7 @@ func upCmdRunE(cmd *cobra.Command, args []string) error {
 			continue
 		}
 		svc := compose.Services[plan.name]
-		tmpl, err := prepareTemplate(plan.name, svc.Image, forceConvert)
+		tmpl, err := prepareServiceTemplate(plan.name, svc, forceConvert)
 		if err != nil {
 			return err
 		}

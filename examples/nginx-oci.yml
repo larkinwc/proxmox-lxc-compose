@@ -1,18 +1,21 @@
 # Run an OCI image directly. The `image:` is not a Proxmox template volid, so
 # `lxc-compose up` auto-converts it to an LXC template, captures the image's
-# entrypoint/command (nginx), and runs it via the container's init command.
+# entrypoint/command, environment, and working directory, then applies overrides.
 #
 # Validated end-to-end on a Proxmox node: `up` -> DHCP IP -> HTTP 200 -> `down`.
 #
 # Requires Docker on the Proxmox node (used for the conversion).
 #
-#   lxc-compose -f examples/nginx-oci.yml up      # convert + start
-#   lxc-compose -f examples/nginx-oci.yml up --pull   # refresh the image
-#   lxc-compose -f examples/nginx-oci.yml down --rm
+#   lxc-compose up -f examples/nginx-oci.yml      # convert + start
+#   lxc-compose up -f examples/nginx-oci.yml --pull --recreate   # replace existing CT
+#   lxc-compose down -f examples/nginx-oci.yml --rm
 version: "1.0"
 services:
   web:
     image: nginx:alpine
+    command: ["nginx", "-g", "daemon off;"]
+    environment:
+      NGINX_ENTRYPOINT_QUIET_LOGS: "1"
     cpu:
       cores: 1
     memory:
